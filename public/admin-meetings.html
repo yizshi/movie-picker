@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Manager - Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container py-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Meeting Manager</h1>
+            <div>
+                <a href="/" class="btn btn-outline-secondary me-2">Home</a>
+                <button onclick="logout()" class="btn btn-outline-danger">Logout</button>
+            </div>
+        </div>
+
+        <div class="auth-section" id="loginSection">
+            <h2>Admin Login Required</h2>
+            <div class="input-group mb-3">
+                <input type="password" id="passwordInput" class="form-control" placeholder="Enter admin password">
+                <button onclick="login()" class="btn btn-primary">Login</button>
+            </div>
+        </div>
+
+        <div id="mainContent" class="d-none">
+            <!-- Create Meeting Form -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title mb-0">Create New Meeting</h3>
+                </div>
+                <div class="card-body">
+                    <form id="createMeetingForm" onsubmit="createMeeting(event)">
+                        <div class="mb-3">
+                            <label for="meetingName" class="form-label">Meeting Name</label>
+                            <input type="text" class="form-control" id="meetingName" required>
+                        </div>
+                        <!-- Meeting date removed: we require votes for candidate days instead -->
+                        <div class="mb-3">
+                            <label class="form-label">Candidate Days</label>
+                            <div id="candidateDays" class="mb-2"></div>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addCandidateDay()">
+                                Add Day Option
+                            </button>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Movie Options</label>
+                            <div id="movieOptions"></div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Create Meeting</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Existing Meetings -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title mb-0">Existing Meetings</h3>
+                </div>
+                <div class="card-body">
+                    <div id="meetingsList">
+                        <!-- Meetings will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let adminToken = localStorage.getItem('adminToken');
+        const loginSection = document.getElementById('loginSection');
+        const mainContent = document.getElementById('mainContent');
+        let movies = [];
+        let meetings = [];
+
+        // Check admin status
+        async function checkAdminStatus() {
+            try {
+                const response = await fetch('/api/admin/me', {
+                    headers: {
+                        'Authorization': `Bearer ${adminToken}`
+                    }
+                });
+                const data = await response.json();
+                if (data.admin) {
+                    showMainContent();
+                    loadData();
+                } else {
+                    hideMainContent();
+                }
+            } catch (err) {
+                hideMainContent();
+            }
+        }
+
+        // Toggle voting status for a meeting (admin)
+        async function toggleVoting(id, currentState) {
+            if (!confirm(`Are you sure you want to ${currentState ? 'finish' : 'open'} voting for this meeting?`)) return;
+            try {
+                const response = await fetch(`/api/meetings/${id}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${adminToken}`
+                    },
+                    body: JSON.stringify({ voting_open: !currentState })
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(()=>null);
+                    alert(data && data.error ? data.error : 'Failed to update meeting');
+                }
+                await loadMeetings();
+            } catch (err) {
+                alert('Error updating meeting');
+            }
+        }
+
+        // Login function
+        async function login() {
+            const password = document.getElementById('passwordInput').value;
+            try {
+                const response = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ password })
+                });
+                const data = await response.json();
+                if (data.token) {
+                    adminToken = data.token;
+                    localStorage.setItem('adminToken', adminToken);
+                    showMainContent();
+                    loadData();
+                    document.getElementById('passwordInput').value = '';
+                } else {
+                    alert('Invalid password');
+                }
+            } catch (err) {
+                alert('Login failed');
+            }
+        }
+
+        // Logout function
+        async function logout() {
+            try {
+                await fetch('/api/admin/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${adminToken}`
+                    }
+                });
+            } catch (err) {
+            }
+            adminToken = null;
+            localStorage.removeItem('adminToken');
+            hideMainContent();
+        }
+
+        // UI helper functions
+        function showMainContent() {
+            loginSection.classList.add('d-none');
+            mainContent.classList.remove('d-none');
+        }
+
+        function hideMainContent() {
+            loginSection.classList.remove('d-none');
+            mainContent.classList.add('d-none');
+        }
+
+        // Load movies and meetings
+        async function loadData() {
+            await Promise.all([
+                loadMovies(),
+                loadMeetings()
+            ]);
+        }
+
+        async function loadMovies() {
+            try {
+                const response = await fetch('/api/movies');
+                movies = await response.json();
+                updateMovieOptions();
+            } catch (err) {
+            }
+        }
+
+        async function loadMeetings() {
+            try {
+                const response = await fetch('/api/meetings');
+                meetings = await response.json();
+                updateMeetingsList();
+            } catch (err) {
+            }
+        }
+
+        function updateMovieOptions() {
+            const container = document.getElementById('movieOptions');
+            container.innerHTML = movies.map(movie => `
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="${movie.id}" id="movie${movie.id}" checked>
+                    <label class="form-check-label" for="movie${movie.id}">
+                        ${movie.title}
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        function updateMeetingsList() {
+            const container = document.getElementById('meetingsList');
+            if (meetings.length === 0) {
+                container.innerHTML = '<p class="text-muted">No meetings yet</p>';
+                return;
+            }
+
+            container.innerHTML = meetings.map(meeting => `
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h5 class="card-title">${meeting.name || 'Unnamed Meeting'}</h5>
+                                <p class="card-text">
+                                    ${meeting.date ? `Date: ${meeting.date}<br>` : ''}
+                                    Status: ${meeting.voting_open ? 'Voting Open' : 'Voting Closed'}
+                                </p>
+                                ${meeting.candidate_days && meeting.candidate_days.length > 0 ? `
+                                    <p class="card-text">
+                                        <small class="text-muted">
+                                            Candidate Days: ${meeting.candidate_days.join(', ')}
+                                        </small>
+                                    </p>
+                                ` : ''}
+                            </div>
+                                            <div class="btn-group" role="group">
+                                                <button onclick="toggleVoting(${meeting.id}, ${meeting.voting_open})" class="btn btn-sm ${meeting.voting_open ? 'btn-warning' : 'btn-success'}">
+                                                    ${meeting.voting_open ? 'Finish Voting' : 'Open Voting'}
+                                                </button>
+                                                <button onclick="deleteMeeting(${meeting.id})" class="btn btn-danger btn-sm">
+                                                    Delete
+                                                </button>
+                                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Add candidate day field
+        function addCandidateDay() {
+            const container = document.getElementById('candidateDays');
+            const dayCount = container.children.length;
+            const dayDiv = document.createElement('div');
+            dayDiv.className = 'input-group mb-2';
+            dayDiv.innerHTML = `
+                <input type="date" class="form-control candidate-day" required>
+                <button type="button" class="btn btn-outline-danger" onclick="this.parentElement.remove()">
+                    Remove
+                </button>
+            `;
+            container.appendChild(dayDiv);
+        }
+
+        // Create meeting
+        async function createMeeting(event) {
+            event.preventDefault();
+            const name = document.getElementById('meetingName').value;
+            // date removed from form: meeting date is not collected here
+            const date = null;
+            const candidateDays = Array.from(document.getElementsByClassName('candidate-day'))
+                .map(input => input.value)
+                .filter(Boolean);
+            const allowedMovieIds = Array.from(document.querySelectorAll('#movieOptions input:checked'))
+                .map(checkbox => parseInt(checkbox.value));
+
+            try {
+                const response = await fetch('/api/meetings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${adminToken}`
+                    },
+                    body: JSON.stringify({
+                        name,
+                        candidate_days: candidateDays,
+                        allowed_movie_ids: allowedMovieIds,
+                        voting_open: true
+                    })
+                });
+
+                if (response.ok) {
+                    document.getElementById('createMeetingForm').reset();
+                    document.getElementById('candidateDays').innerHTML = '';
+                    loadMeetings();
+                } else {
+                    alert('Failed to create meeting');
+                }
+            } catch (err) {
+                alert('Error creating meeting');
+            }
+        }
+
+        // Delete meeting
+        async function deleteMeeting(id) {
+            if (!confirm('Are you sure you want to delete this meeting?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/meetings/${id}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${adminToken}`
+                    }
+                });
+                
+                if (response.ok) {
+                    loadMeetings();
+                } else {
+                    const data = await response.json();
+                    alert(data.error || 'Failed to delete meeting');
+                }
+            } catch (err) {
+                alert('Error deleting meeting');
+            }
+        }
+
+        // Add enter key support for login
+        document.getElementById('passwordInput')?.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+
+        // Initialize admin status check
+        checkAdminStatus();
+    </script>
+</body>
+</html>

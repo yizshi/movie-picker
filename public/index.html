@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Movie Picker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1>Movie Picker</h1>
+      <div id="adminSection" class="text-end">
+        <!-- Login form will show here when logged out -->
+        <div id="loginForm" class="d-none">
+          <div class="input-group">
+            <input type="password" id="passwordInput" class="form-control" placeholder="Admin password">
+            <button onclick="login()" class="btn btn-primary">Login</button>
+          </div>
+        </div>
+        <!-- Logout button will show here when logged in -->
+        <div id="logoutForm" class="d-none">
+          <button onclick="logout()" class="btn btn-outline-danger">Logout</button>
+        </div>
+      </div>
+    </div>
+    
+    <p class="lead">A small app to suggest movies and hold a ranked vote (top 3).</p>
+
+    <div class="list-group mb-4">
+      <a href="/suggest.html" class="list-group-item list-group-item-action">Suggest a movie</a>
+      <a href="/vote.html" class="list-group-item list-group-item-action">Vote (top 3)</a>
+      <a href="/results.html" class="list-group-item list-group-item-action">View results</a>
+      <a href="/watched-list.html" class="list-group-item list-group-item-action">Watched meetings</a>
+    </div>
+
+    <!-- Admin section -->
+    <div id="adminLinks" class="d-none">
+      <h5 class="mb-3">Admin Tools</h5>
+      <div class="list-group">
+        <a href="/admin-movies.html" class="list-group-item list-group-item-action">
+          <div class="d-flex justify-content-between align-items-center">
+            <span>Manage Movie Suggestions</span>
+            <span class="badge bg-primary rounded-pill" id="movieCount">0</span>
+          </div>
+        </a>
+        <a href="/admin-meetings.html" class="list-group-item list-group-item-action">
+          <div class="d-flex justify-content-between align-items-center">
+            <span>Manage Meetings</span>
+            <span class="badge bg-primary rounded-pill" id="meetingCount">0</span>
+          </div>
+        </a>
+      </div>
+    </div>
+
+    <hr />
+    <h5 class="mt-3">Quick links</h5>
+    <p>
+      Suggestions and votes are public within this simple app. For production use, add authentication and validation.
+    </p>
+  </div>
+
+  <script>
+    // Admin state management
+    let adminToken = localStorage.getItem('adminToken');
+    const loginForm = document.getElementById('loginForm');
+    const logoutForm = document.getElementById('logoutForm');
+    const adminLinks = document.getElementById('adminLinks');
+    const movieCount = document.getElementById('movieCount');
+
+    // Check admin status on page load
+    async function checkAdminStatus() {
+      try {
+        const response = await fetch('/api/admin/me', {
+          headers: {
+            'Authorization': `Bearer ${adminToken}`
+          }
+        });
+        const data = await response.json();
+        if (data.admin) {
+          showAdminUI();
+          updateMovieCount();
+        } else {
+          hideAdminUI();
+        }
+      } catch (err) {
+        hideAdminUI();
+      }
+    }
+
+    // Login function
+    async function login() {
+      const password = document.getElementById('passwordInput').value;
+      try {
+        const response = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ password })
+        });
+        const data = await response.json();
+        if (data.token) {
+          adminToken = data.token;
+          localStorage.setItem('adminToken', adminToken);
+          showAdminUI();
+          updateMovieCount();
+          document.getElementById('passwordInput').value = '';
+        } else {
+          alert('Invalid password');
+        }
+      } catch (err) {
+        alert('Login failed');
+      }
+    }
+
+    // Logout function
+    async function logout() {
+      try {
+        await fetch('/api/admin/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${adminToken}`
+          }
+        });
+      } catch (err) {
+      }
+      adminToken = null;
+      localStorage.removeItem('adminToken');
+      hideAdminUI();
+    }
+
+    // Update counts
+    async function updateMovieCount() {
+      try {
+        const [moviesResponse, meetingsResponse] = await Promise.all([
+          fetch('/api/movies'),
+          fetch('/api/meetings')
+        ]);
+        
+        const movies = await moviesResponse.json();
+        const meetings = await meetingsResponse.json();
+        
+        movieCount.textContent = movies.length;
+        document.getElementById('meetingCount').textContent = meetings.length;
+      } catch (err) {
+        movieCount.textContent = '?';
+        document.getElementById('meetingCount').textContent = '?';
+      }
+    }
+
+    // UI helper functions
+    function showAdminUI() {
+      loginForm.classList.add('d-none');
+      logoutForm.classList.remove('d-none');
+      adminLinks.classList.remove('d-none');
+    }
+
+    function hideAdminUI() {
+      loginForm.classList.remove('d-none');
+      logoutForm.classList.add('d-none');
+      adminLinks.classList.add('d-none');
+    }
+
+    // Add enter key support for login
+    document.getElementById('passwordInput')?.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        login();
+      }
+    });
+
+    // Initialize admin status check
+    checkAdminStatus();
+  </script>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Watched Meetings - Movie Picker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container py-4">
+    <a href="/" class="btn btn-link">← Back</a>
+    <h1 class="mb-3">Watched meetings</h1>
+
+    <div id="watched-meetings-list">
+      <div class="text-muted">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    async function fetchMeetings() { const r = await fetch('/api/meetings'); return await r.json(); }
+    async function fetchMeeting(id) { const r = await fetch(`/api/meetings/${id}`); return await r.json(); }
+
+    async function render() {
+      const container = document.getElementById('watched-meetings-list');
+      try {
+        const meetings = await fetchMeetings();
+        const closed = (meetings || []).filter(m => Number(m.voting_open) === 0);
+        if (!closed.length) {
+          container.innerHTML = '<div class="text-muted">No finished meetings yet.</div>';
+          return;
+        }
+        // show list
+        container.innerHTML = '';
+        for (const m of closed) {
+          const item = document.createElement('div'); item.className = 'card mb-3';
+          const title = m.name || m.date || `Meeting ${m.id}`;
+          // fetch meeting detail to see watched_movie
+          const detail = await fetchMeeting(m.id).catch(() => m);
+          let watchedText = '<span class="text-muted">No watched movie recorded</span>';
+          if (detail && detail.watched_movie) {
+            watchedText = `<a href="/watched.html?meetingId=${m.id}">${detail.watched_movie.title}</a>`;
+          } else if (detail && detail.watched_movie_id) {
+            watchedText = `<a href="/watched.html?meetingId=${m.id}">movie id ${detail.watched_movie_id}</a>`;
+          }
+          item.innerHTML = `
+            <div class="card-body d-flex justify-content-between align-items-center">
+              <div>
+                <h5 class="card-title mb-1">${title}</h5>
+                <div class="text-muted">Days: ${detail.candidate_days && detail.candidate_days.length ? detail.candidate_days.join(', ') : '—'}</div>
+              </div>
+              <div class="text-end">
+                <div>Watched: ${watchedText}</div>
+                <a class="btn btn-primary btn-sm mt-2" href="/watched.html?meetingId=${m.id}">Open</a>
+              </div>
+            </div>
+          `;
+          container.appendChild(item);
+        }
+      } catch (err) {
+        container.innerHTML = '<div class="text-muted">Error loading meetings.</div>';
+      }
+    }
+
+    render();
+  </script>
+</body>
+</html>
