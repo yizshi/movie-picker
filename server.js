@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS movies (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
   poster TEXT,
+  genres TEXT,
   notes TEXT,
   suggester TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -74,6 +75,13 @@ if (!colNames.includes('availability')) {
   db.prepare("ALTER TABLE ballots ADD COLUMN availability TEXT").run();
 }
 
+// Add genres column to movies table if it doesn't exist
+const movieCols = db.prepare("PRAGMA table_info(movies);").all();
+const movieColNames = movieCols.map(c => c.name);
+if (!movieColNames.includes('genres')) {
+  db.prepare('ALTER TABLE movies ADD COLUMN genres TEXT').run();
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -90,20 +98,23 @@ function getMovies() {
 const http = require('http');
 require('dotenv').config();
 
-// Fetch movie poster from TMDB API
-async function fetchMoviePoster(movieTitle) {
+// Fetch movie poster and genres from TMDB API
+async function fetchMovieData(movieTitle) {
   const TMDB_API_KEY = process.env.TMDB_API_KEY;
   if (!TMDB_API_KEY) {
-    return null;
+    return { poster: null, genres: null };
   }
 
   try {
+    let movieId = null;
+    let posterPath = null;
+    
     // If input looks like an IMDB URL, extract the IMDB id and use TMDB's find endpoint
     if (typeof movieTitle === 'string') {
       const imdbMatch = movieTitle.match(/imdb\.com\/title\/(tt\d+)/i);
       if (imdbMatch) {
         const imdbId = imdbMatch[1];
-  const findUrl = `https://api.themoviedb.org/3/find/${imdbId}?external_source=imdb_id`;
+        const findUrl = `https://api.themoviedb.org/3/find/${imdbId}?external_source=imdb_id`;
         const findResp = await fetch(findUrl, {
           headers: {
             'Authorization': `Bearer ${TMDB_API_KEY}`,
@@ -115,45 +126,70 @@ async function fetchMoviePoster(movieTitle) {
           // movie_results contains matching movies
           if (findData.movie_results && findData.movie_results.length > 0) {
             const movie = findData.movie_results[0];
-            if (movie.poster_path) {
-              const posterUrl = `https://image.tmdb.org/t/p/original${movie.poster_path}`;
-              return posterUrl;
-            }
+            movieId = movie.id;
+            posterPath = movie.poster_path;
           }
         }
-        // If find didn't return a poster, fall through to title search below
       }
     }
 
-    // Fallback: search by title
-    const searchUrl = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(movieTitle || '')}`;
-    const searchResponse = await fetch(searchUrl, {
-      headers: {
-        'Authorization': `Bearer ${TMDB_API_KEY}`,
-        'Accept': 'application/json'
+    // Fallback: search by title if we didn't find via IMDB
+    if (!movieId) {
+      const searchUrl = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(movieTitle || '')}`;
+      const searchResponse = await fetch(searchUrl, {
+        headers: {
+          'Authorization': `Bearer ${TMDB_API_KEY}`,
+          'Accept': 'application/json'
+        }
+      });
+      if (!searchResponse.ok) {
+        return { poster: null, genres: null };
       }
-    });
-    if (!searchResponse.ok) {
-      return null;
+
+      const searchData = await searchResponse.json();
+      if (!searchData.results || searchData.results.length === 0) {
+        return { poster: null, genres: null };
+      }
+
+      const movie = searchData.results[0];
+      movieId = movie.id;
+      posterPath = movie.poster_path;
     }
 
-    const searchData = await searchResponse.json();
-    if (!searchData.results || searchData.results.length === 0) {
-      return null;
+    // Now fetch detailed movie information including genres
+    if (movieId) {
+      const detailUrl = `https://api.themoviedb.org/3/movie/${movieId}`;
+      const detailResponse = await fetch(detailUrl, {
+        headers: {
+          'Authorization': `Bearer ${TMDB_API_KEY}`,
+          'Accept': 'application/json'
+        }
+      });
+      
+      if (detailResponse.ok) {
+        const detailData = await detailResponse.json();
+        const genres = detailData.genres ? detailData.genres.map(g => g.name) : [];
+        const posterUrl = posterPath ? `https://image.tmdb.org/t/p/original${posterPath}` : null;
+        
+        return {
+          poster: posterUrl,
+          genres: genres.length > 0 ? JSON.stringify(genres) : null
+        };
+      }
     }
 
-    // Get the first result's poster
-    const movie = searchData.results[0];
-    if (!movie.poster_path) {
-      return null;
-    }
-
-    const posterUrl = `https://image.tmdb.org/t/p/original${movie.poster_path}`;
-    
-    return posterUrl;
+    // Fallback: return just the poster if detailed fetch failed
+    const posterUrl = posterPath ? `https://image.tmdb.org/t/p/original${posterPath}` : null;
+    return { poster: posterUrl, genres: null };
   } catch (err) {
-    return null;
+    return { poster: null, genres: null };
   }
+}
+
+// Legacy function for backward compatibility
+async function fetchMoviePoster(movieTitle) {
+  const data = await fetchMovieData(movieTitle);
+  return data.poster;
 }
 
 // GET all movies
@@ -175,20 +211,24 @@ app.post('/api/movies', async (req, res) => {
 
   try {
     let finalPosterUrl = poster;
+    let finalGenres = null;
 
     // If poster contains an IMDB URL, try to fetch via TMDB find endpoint
     if (poster && typeof poster === 'string' && poster.includes('imdb.com')) {
-      const fetched = await fetchMoviePoster(poster);
-      if (fetched) finalPosterUrl = fetched;
+      const movieData = await fetchMovieData(poster);
+      if (movieData.poster) finalPosterUrl = movieData.poster;
+      if (movieData.genres) finalGenres = movieData.genres;
     }
 
-    // If no poster URL is provided all, try to fetch from TMDB using title
+    // If no poster URL is provided, try to fetch from TMDB using title
     if (!finalPosterUrl) {
-      finalPosterUrl = await fetchMoviePoster(title);
+      const movieData = await fetchMovieData(title);
+      if (movieData.poster) finalPosterUrl = movieData.poster;
+      if (movieData.genres) finalGenres = movieData.genres;
     }
 
-    const stmt = db.prepare('INSERT INTO movies (title, poster, notes, suggester) VALUES (?, ?, ?, ?)');
-    const info = stmt.run(title, finalPosterUrl || null, notes || null, suggester || null);
+    const stmt = db.prepare('INSERT INTO movies (title, poster, genres, notes, suggester) VALUES (?, ?, ?, ?, ?)');
+    const info = stmt.run(title, finalPosterUrl || null, finalGenres || null, notes || null, suggester || null);
     const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(info.lastInsertRowid);
     res.json(movie);
   } catch (err) {
@@ -243,7 +283,7 @@ app.get('/api/results', (req, res) => {
   let rows;
   if (meetingId) {
     rows = db.prepare(`
-      SELECT m.id, m.title, m.poster, m.notes, m.suggester,
+      SELECT m.id, m.title, m.poster, m.genres, m.notes, m.suggester,
         COALESCE(SUM(4 - bv.rank), 0) AS score,
         COUNT(DISTINCT b.id) AS ballots,
         COUNT(bv.id) AS vote_count
@@ -255,7 +295,7 @@ app.get('/api/results', (req, res) => {
     `).all(meetingId);
   } else {
     rows = db.prepare(`
-      SELECT m.id, m.title, m.poster, m.notes, m.suggester,
+      SELECT m.id, m.title, m.poster, m.genres, m.notes, m.suggester,
         COALESCE(SUM(4 - bv.rank), 0) AS score,
         COUNT(DISTINCT b.id) AS ballots,
         COUNT(bv.id) AS vote_count

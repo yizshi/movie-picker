@@ -46,6 +46,23 @@
     function qs(name) { const u = new URL(window.location.href); return u.searchParams.get(name); }
     const meetingId = qs('meetingId');
 
+    // Helper function to render genres as tags
+    function renderGenres(genres) {
+      if (!genres) return '';
+      
+      let genreArray;
+      try {
+        genreArray = typeof genres === 'string' ? JSON.parse(genres) : genres;
+      } catch (e) {
+        return '';
+      }
+      
+      if (!Array.isArray(genreArray) || genreArray.length === 0) return '';
+      
+      const tags = genreArray.map(genre => `<span class="genre-tag">${genre}</span>`).join('');
+      return `<div class="genre-tags">${tags}</div>`;
+    }
+
     async function fetchMeeting(id) {
       const res = await fetch(`/api/meetings/${id}`); return await res.json();
     }
@@ -64,7 +81,20 @@
         if (!meeting) { area.innerHTML = '<div class="text-muted">Meeting not found.</div>'; return; }
         if (!meeting.watched_movie) { area.innerHTML = '<div class="text-muted">No watched movie recorded for this meeting.</div>'; return; }
         const mv = meeting.watched_movie;
-        const card = `\n          <div class="card flex-row">\n            <div style=\"padding:0.5rem\">\n              <img src=\"${mv.poster || 'https://via.placeholder.com/240x360?text=No+Poster'}\" alt=\"${mv.title}\" width=\"160\" height=\"240\" style=\"object-fit:cover\" />\n            </div>\n            <div class=\"card-body\">\n              <h3 class=\"card-title\">${mv.title}</h3>\n              <p class=\"card-text\">${mv.notes || ''}</p>\n              <div class=\"text-muted\">Suggested by: ${mv.suggester || 'Anonymous'}</div>\n            </div>\n          </div>\n        `;
+        const genresHtml = renderGenres(mv.genres);
+        const card = `
+          <div class="card flex-row">
+            <div style="padding:0.5rem">
+              <img src="${mv.poster || 'https://via.placeholder.com/240x360?text=No+Poster'}" alt="${mv.title}" width="160" height="240" style="object-fit:cover" />
+            </div>
+            <div class="card-body">
+              <h3 class="card-title">${mv.title}</h3>
+              ${genresHtml}
+              <p class="card-text">${mv.notes || ''}</p>
+              <div class="text-muted">Suggested by: ${mv.suggester || 'Anonymous'}</div>
+            </div>
+          </div>
+        `;
         document.getElementById('movie-card').innerHTML = card;
 
         // wire the Open watched page link on results to this page if present

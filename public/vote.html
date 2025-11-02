@@ -22,29 +22,69 @@
         <label class="form-label">Your name</label>
         <input type="text" id="vote-name" class="form-control" placeholder="Your name" required>
       </div>
-      <div class="mb-2">
-        <label class="form-label">1st choice</label>
-        <select id="rank1" class="form-select" required>
-          <option value="" disabled selected>pick me, it's required</option>
-        </select>
-      </div>
-      <div class="mb-2">
-        <label class="form-label">2nd choice</label>
-        <select id="rank2" class="form-select" required>
-          <option value="" disabled selected>pick me, it's required</option>
-        </select>
-      </div>
-      <div class="mb-2">
-        <label class="form-label">3rd choice</label>
-        <select id="rank3" class="form-select" required>
-          <option value="" disabled selected>pick me, it's required</option>
-        </select>
+      <div class="mb-3">
+        <label class="form-label mb-2">Movie Rankings</label>
+        <div class="d-flex flex-column flex-md-row gap-3">
+          <div class="flex-fill">
+            <label class="form-label text-muted small">1st choice</label>
+            <select id="rank1" class="form-select" required>
+              <option value="" disabled selected>1st choice</option>
+            </select>
+          </div>
+          <div class="flex-fill">
+            <label class="form-label text-muted small">2nd choice</label>
+            <select id="rank2" class="form-select" required>
+              <option value="" disabled selected>2nd choice</option>
+            </select>
+          </div>
+          <div class="flex-fill">
+            <label class="form-label text-muted small">3rd choice</label>
+            <select id="rank3" class="form-select" required>
+              <option value="" disabled selected>3rd choice</option>
+            </select>
+          </div>
+        </div>
       </div>
       <button class="btn btn-success" type="submit">Submit votes</button>
       <div id="vote-msg" class="mt-2"></div>
     </form>
 
     <h3 class="mt-4">Current suggestions</h3>
+    
+    <!-- Search and Filter Controls -->
+    <div class="movie-controls mb-3">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i>🔍</span>
+            <input type="text" id="movie-search" class="form-control" placeholder="Search movies by title...">
+            <button class="btn btn-outline-secondary" type="button" id="clear-search">Clear</button>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <select id="genre-filter" class="form-select">
+            <option value="">All Genres</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <select id="suggester-filter" class="form-select">
+            <option value="">All Suggesters</option>
+          </select>
+        </div>
+      </div>
+      <div class="row mt-2">
+        <div class="col-12">
+          <div class="d-flex justify-content-between align-items-center">
+            <small class="text-muted" id="movie-count">Loading movies...</small>
+            <div>
+              <button class="btn btn-sm btn-outline-primary" id="expand-all">Expand All</button>
+              <button class="btn btn-sm btn-outline-secondary" id="collapse-all">Collapse All</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
     <div id="movies-list" class="row gy-3"></div>
   </div>
 
