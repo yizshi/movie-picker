@@ -1,6 +1,16 @@
 async function fetchMovies() {
-  const res = await fetch('/api/movies');
-  return await res.json();
+  try {
+    const res = await fetch('/api/movies');
+    if (!res.ok) {
+      throw new Error(`HTTP error! status: ${res.status}`);
+    }
+    const data = await res.json();
+    console.log('Fetched movies:', data.length, 'movies');
+    return data;
+  } catch (error) {
+    console.error('Error fetching movies:', error);
+    return [];
+  }
 }
 
 async function fetchResults(meetingId) {

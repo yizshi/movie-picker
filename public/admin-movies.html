@@ -170,7 +170,7 @@
                         <h3>${movie.title}</h3>
                         <p>Suggested by: ${movie.suggester || 'Anonymous'}</p>
                         <p>${movie.notes || ''}</p>
-                        <button class="delete-btn" onclick="deleteMovie(${movie.id})">Delete</button>
+                        <button class="delete-btn" onclick="deleteMovie('${movie.id}')">Delete</button>
                     </div>
                 `).join('');
             } catch (err) {

@@ -395,9 +395,37 @@ app.delete('/api/meetings/:id', requireAdmin, (req, res) => {
 
 // --- Admin login (simple token store) ---------------------------------
 const crypto = require('crypto');
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-if (!ADMIN_PASSWORD) {
-  throw new Error('ADMIN_PASSWORD not set. Please create a .env file with ADMIN_PASSWORD=your_password');
+const bcrypt = require('bcrypt');
+
+// Admin authentication
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+const ADMIN_PASSWORD_PLAINTEXT = process.env.ADMIN_PASSWORD; // For backward compatibility
+
+if (!ADMIN_PASSWORD_HASH && !ADMIN_PASSWORD_PLAINTEXT) {
+  throw new Error('Neither ADMIN_PASSWORD_HASH nor ADMIN_PASSWORD is set. Please create a .env file with one of these variables.');
+}
+
+// Helper function to verify password against hash or plaintext (for migration)
+async function verifyPassword(inputPassword, storedHash, storedPlaintext) {
+  if (!inputPassword) return false;
+  
+  // If hash exists, use bcrypt verification
+  if (storedHash) {
+    try {
+      return await bcrypt.compare(inputPassword, storedHash);
+    } catch (error) {
+      console.error('Error verifying password hash:', error);
+      return false;
+    }
+  }
+  
+  // Fallback to plaintext comparison (for backward compatibility)
+  if (storedPlaintext) {
+    console.warn('Using plaintext password comparison. Consider upgrading to hashed password.');
+    return inputPassword === storedPlaintext;
+  }
+  
+  return false;
 }
 // token -> expiry (ms since epoch)
 const adminTokens = new Map();
@@ -413,15 +441,12 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
   const { password } = req.body || {};
   
-  // Add debug logging
+  const isValidPassword = await verifyPassword(password, ADMIN_PASSWORD_HASH, ADMIN_PASSWORD_PLAINTEXT);
   
-  
-  
-  if (!password || password !== ADMIN_PASSWORD) {
-    
+  if (!isValidPassword) {
     return res.status(401).json({ error: 'invalid password' });
   }
   

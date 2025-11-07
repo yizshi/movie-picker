@@ -4,17 +4,31 @@
   "description": "Simple movie suggestion and ranked voting app",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:sqlite": "node server.js",
+    "start:firebase": "node server-firebase.js",
+    "start:emulator": "firebase emulators:start",
+    "deploy": "firebase deploy",
+    "deploy:hosting": "firebase deploy --only hosting",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy:firestore": "firebase deploy --only firestore",
+    "migrate": "node migrate-to-firebase.js"
   },
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@dataconnect/generated": "file:src/dataconnect-generated",
     "better-sqlite3": "^8.7.0",
     "body-parser": "^1.20.2",
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.18.2",
-    "node-fetch": "^2.7.0"
+    "firebase-admin": "^11.11.1",
+    "node-fetch": "^2.7.0",
+    "bcrypt": "^5.1.1"
+  },
+  "devDependencies": {
+    "firebase-tools": "^12.4.0"
   }
 }

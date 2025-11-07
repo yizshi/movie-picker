@@ -234,10 +234,10 @@
                                 ` : ''}
                             </div>
                                             <div class="btn-group" role="group">
-                                                <button onclick="toggleVoting(${meeting.id}, ${meeting.voting_open})" class="btn btn-sm ${meeting.voting_open ? 'btn-warning' : 'btn-success'}">
+                                                <button onclick="toggleVoting('${meeting.id}', ${meeting.voting_open})" class="btn btn-sm ${meeting.voting_open ? 'btn-warning' : 'btn-success'}">
                                                     ${meeting.voting_open ? 'Finish Voting' : 'Open Voting'}
                                                 </button>
-                                                <button onclick="deleteMeeting(${meeting.id})" class="btn btn-danger btn-sm">
+                                                <button onclick="deleteMeeting('${meeting.id}')" class="btn btn-danger btn-sm">
                                                     Delete
                                                 </button>
                                             </div>
