@@ -47,15 +47,35 @@ async function getMovies() {
   try {
     // Remove orderBy to avoid index requirement issues, sort in memory instead
     const snapshot = await db.collection('movies').get();
-    const movies = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const movies = snapshot.docs.map(doc => {
+      const data = doc.data();
+      
+      // Convert Firestore Timestamp to JavaScript Date string
+      let created_at = null;
+      if (data.created_at) {
+        if (data.created_at._seconds) {
+          // Firestore Timestamp format
+          created_at = new Date(data.created_at._seconds * 1000).toISOString();
+        } else if (data.created_at.toDate) {
+          // Firestore Timestamp object with toDate method
+          created_at = data.created_at.toDate().toISOString();
+        } else if (typeof data.created_at === 'string') {
+          // Already a string
+          created_at = data.created_at;
+        }
+      }
+      
+      return {
+        id: doc.id,
+        ...data,
+        created_at
+      };
+    });
     
     // Sort in memory by created_at desc
     movies.sort((a, b) => {
-      const aTime = a.created_at && a.created_at._seconds ? a.created_at._seconds : 0;
-      const bTime = b.created_at && b.created_at._seconds ? b.created_at._seconds : 0;
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
       return bTime - aTime;
     });
     

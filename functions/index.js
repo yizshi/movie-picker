@@ -12,8 +12,8 @@ const bcrypt = require('bcrypt');
 admin.initializeApp();
 const db = admin.firestore();
 
-// Get config from Firebase Functions config
-const config = functions.config();
+// Load environment variables (Firebase Functions supports .env files)
+require('dotenv').config();
 
 const app = express();
 app.use(cors());
@@ -24,15 +24,35 @@ async function getMovies() {
   try {
     // Remove orderBy to avoid index requirement issues, sort in memory instead
     const snapshot = await db.collection('movies').get();
-    const movies = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const movies = snapshot.docs.map(doc => {
+      const data = doc.data();
+      
+      // Convert Firestore Timestamp to JavaScript Date string
+      let created_at = null;
+      if (data.created_at) {
+        if (data.created_at._seconds) {
+          // Firestore Timestamp format
+          created_at = new Date(data.created_at._seconds * 1000).toISOString();
+        } else if (data.created_at.toDate) {
+          // Firestore Timestamp object with toDate method
+          created_at = data.created_at.toDate().toISOString();
+        } else if (typeof data.created_at === 'string') {
+          // Already a string
+          created_at = data.created_at;
+        }
+      }
+      
+      return {
+        id: doc.id,
+        ...data,
+        created_at
+      };
+    });
     
     // Sort in memory by created_at desc
     movies.sort((a, b) => {
-      const aTime = a.created_at && a.created_at._seconds ? a.created_at._seconds : 0;
-      const bTime = b.created_at && b.created_at._seconds ? b.created_at._seconds : 0;
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
       return bTime - aTime;
     });
     
@@ -45,9 +65,10 @@ async function getMovies() {
 
 // Fetch movie poster and genres from TMDB API
 async function fetchMovieData(movieTitle) {
-  const TMDB_API_KEY = config.app?.tmdb_api_key;
+  const TMDB_API_KEY = process.env.TMDB_API_KEY;
   if (!TMDB_API_KEY) {
-    return { poster: null, genres: null };
+    console.log('⚠️ TMDB_API_KEY not found in environment variables');
+    return { poster: null, genres: null, metadata: null };
   }
 
   try {
@@ -141,8 +162,8 @@ async function fetchMovieData(movieTitle) {
 }
 
 // Admin authentication
-const ADMIN_PASSWORD_HASH = config.app?.admin_password_hash;
-const ADMIN_PASSWORD_PLAINTEXT = config.app?.admin_password; // For backward compatibility
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+const ADMIN_PASSWORD_PLAINTEXT = process.env.ADMIN_PASSWORD; // For backward compatibility
 
 if (!ADMIN_PASSWORD_HASH && !ADMIN_PASSWORD_PLAINTEXT) {
   console.warn('Neither ADMIN_PASSWORD_HASH nor ADMIN_PASSWORD is set. Admin features will not work.');
@@ -242,23 +263,27 @@ app.post('/api/movies', async (req, res) => {
   try {
     let finalPosterUrl = poster;
     let finalGenres = null;
+    let finalMetadata = null;
 
     if (poster && typeof poster === 'string' && poster.includes('imdb.com')) {
       const movieData = await fetchMovieData(poster);
       if (movieData.poster) finalPosterUrl = movieData.poster;
       if (movieData.genres) finalGenres = movieData.genres;
+      if (movieData.metadata) finalMetadata = movieData.metadata;
     }
 
     if (!finalPosterUrl) {
       const movieData = await fetchMovieData(title);
       if (movieData.poster) finalPosterUrl = movieData.poster;
       if (movieData.genres) finalGenres = movieData.genres;
+      if (movieData.metadata) finalMetadata = movieData.metadata;
     }
 
     const movieDoc = {
       title,
       poster: finalPosterUrl || null,
       genres: finalGenres || null,
+      metadata: finalMetadata || null,
       notes: notes || null,
       suggester: suggester || null,
       created_at: admin.firestore.FieldValue.serverTimestamp()
