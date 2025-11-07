@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>All Movies - Movie Picker</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="movies-page">
+  <div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <a href="/" class="btn btn-link">← Back</a>
+        <h1 class="mb-0">All Movie Suggestions</h1>
+      </div>
+      <a href="/suggest.html" class="btn btn-primary">
+        <span>📝</span> Suggest New Movie
+      </a>
+    </div>
+
+    <!-- Search and Filter Controls -->
+    <div class="movie-controls mb-4">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="input-group">
+            <span class="input-group-text">🔍</span>
+            <input type="text" id="movie-search" class="form-control" placeholder="Search movies by title...">
+            <button class="btn btn-outline-secondary" type="button" id="clear-search">Clear</button>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <select id="genre-filter" class="form-select">
+            <option value="">All Genres</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <select id="suggester-filter" class="form-select">
+            <option value="">All Suggesters</option>
+          </select>
+        </div>
+      </div>
+      
+      <!-- Sort Options -->
+      <div class="row mt-3">
+        <div class="col-md-6">
+          <div class="input-group input-group-sm">
+            <label class="input-group-text">Sort by:</label>
+            <select id="sort-options" class="form-select">
+              <option value="title-asc">Title A-Z</option>
+              <option value="title-desc">Title Z-A</option>
+              <option value="suggester-asc">Suggester A-Z</option>
+              <option value="suggester-desc">Suggester Z-A</option>
+              <option value="recent">Most Recent</option>
+              <option value="oldest">Oldest First</option>
+            </select>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="d-flex justify-content-between align-items-center">
+            <small class="text-muted" id="movie-count">Loading movies...</small>
+            <div>
+              <button class="btn btn-sm btn-outline-primary" id="expand-all">Expand All</button>
+              <button class="btn btn-sm btn-outline-secondary" id="collapse-all">Collapse All</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Movies Grid -->
+    <div id="movies-list" class="row gy-4"></div>
+    
+    <!-- Empty State -->
+    <div id="empty-state" class="text-center py-5 d-none">
+      <div class="mb-3">
+        <span style="font-size: 3rem;">🎬</span>
+      </div>
+      <h3 class="text-muted">No movies found</h3>
+      <p class="text-muted">Try adjusting your search filters or suggest the first movie!</p>
+      <a href="/suggest.html" class="btn btn-primary">Suggest a Movie</a>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+  <script>
+    // Enhanced functionality for movies page
+    let currentSortOrder = 'title-asc';
+    
+    // Override the renderFilteredMovies function to add sorting
+    const originalRenderFiltered = window.renderFilteredMovies || function() {};
+    
+    window.renderFilteredMovies = function(movies) {
+      const sortedMovies = sortMovies(movies, currentSortOrder);
+      
+      const container = document.getElementById('movies-list');
+      const countElement = document.getElementById('movie-count');
+      const emptyState = document.getElementById('empty-state');
+      
+      container.innerHTML = '';
+      
+      if (!sortedMovies.length) {
+        container.classList.add('d-none');
+        emptyState.classList.remove('d-none');
+        if (countElement) countElement.textContent = 'No movies found';
+        return;
+      }
+      
+      container.classList.remove('d-none');
+      emptyState.classList.add('d-none');
+      
+      sortedMovies.forEach(movie => {
+        const movieCard = createEnhancedMovieCard(movie);
+        container.appendChild(movieCard);
+      });
+      
+      if (countElement) {
+        const total = window.originalMoviesData?.length || 0;
+        countElement.textContent = `Showing ${sortedMovies.length} of ${total} movies`;
+      }
+    };
+    
+    // Enhanced movie card for movies page (no voting buttons)
+    function createEnhancedMovieCard(movie) {
+      const col = document.createElement('div');
+      col.className = 'col-lg-6 col-xl-4';
+      col.dataset.movieId = movie.id;
+      col.dataset.title = movie.title.toLowerCase();
+      col.dataset.suggester = (movie.suggester || '').toLowerCase();
+      
+      // Extract genres for filtering
+      let movieGenres = [];
+      try {
+        movieGenres = movie.genres ? JSON.parse(movie.genres) : [];
+      } catch (e) {}
+      col.dataset.genres = movieGenres.join(',').toLowerCase();
+      
+      const card = document.createElement('div');
+      card.className = 'card h-100 shadow-sm';
+      card.style.cursor = 'pointer';
+      card.style.transition = 'transform 0.2s ease, box-shadow 0.2s ease';
+      
+      // Hover effects
+      card.addEventListener('mouseenter', () => {
+        card.style.transform = 'translateY(-2px)';
+        card.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+      });
+      
+      card.addEventListener('mouseleave', () => {
+        card.style.transform = 'translateY(0)';
+        card.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+      });
+      
+      // Movie poster with aspect ratio
+      const imgContainer = document.createElement('div');
+      imgContainer.className = 'position-relative movie-card-poster';
+      imgContainer.style.aspectRatio = '2/3';
+      
+      const img = document.createElement('img');
+      img.className = 'card-img-top w-100 h-100';
+      img.src = movie.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
+      img.alt = movie.title;
+      img.style.objectFit = 'cover';
+      img.loading = 'lazy';
+      
+      imgContainer.appendChild(img);
+      
+      // Expand/collapse indicator
+      const expandIcon = document.createElement('div');
+      expandIcon.className = 'position-absolute top-0 end-0 m-2';
+      expandIcon.innerHTML = '<span class="badge bg-dark bg-opacity-75">▼</span>';
+      imgContainer.appendChild(expandIcon);
+      
+      const cardBody = document.createElement('div');
+      cardBody.className = 'card-body d-flex flex-column movie-card-body';
+      
+      // Title
+      const title = document.createElement('h5');
+      title.className = 'card-title mb-2';
+      title.textContent = movie.title;
+      title.style.lineHeight = '1.2';
+      
+      // Genres
+      if (movieGenres.length > 0) {
+        const genresDiv = document.createElement('div');
+        genresDiv.className = 'mb-2';
+        genresDiv.innerHTML = movieGenres.map(genre => 
+          `<span class="badge bg-light text-dark me-1 mb-1">${genre}</span>`
+        ).join('');
+        cardBody.appendChild(title);
+        cardBody.appendChild(genresDiv);
+      } else {
+        cardBody.appendChild(title);
+      }
+      
+      // Suggester
+      const suggester = document.createElement('div');
+      suggester.className = 'text-muted mb-2';
+      suggester.innerHTML = `<small><strong>Suggested by:</strong> ${movie.suggester || 'Anonymous'}</small>`;
+      cardBody.appendChild(suggester);
+      
+      // Collapsible details
+      const details = document.createElement('div');
+      details.className = 'movie-details mt-auto';
+      details.style.display = 'none';
+      
+      if (movie.notes) {
+        const notesLabel = document.createElement('strong');
+        notesLabel.className = 'd-block mt-2 text-primary';
+        notesLabel.textContent = 'Notes:';
+        
+        const notes = document.createElement('p');
+        notes.className = 'card-text small mb-2';
+        notes.textContent = movie.notes;
+        notes.style.fontStyle = 'italic';
+        
+        details.appendChild(notesLabel);
+        details.appendChild(notes);
+      }
+      
+      // Additional info
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'mt-2 pt-2 border-top';
+      infoDiv.innerHTML = `
+        <small class="text-muted d-block">Movie ID: ${movie.id}</small>
+        ${movie.created_at ? `<small class="text-muted d-block">Added: ${new Date(movie.created_at).toLocaleDateString()}</small>` : ''}
+      `;
+      details.appendChild(infoDiv);
+      
+      cardBody.appendChild(details);
+      
+      // Click to expand/collapse
+      card.addEventListener('click', (e) => {
+        const isExpanded = details.style.display !== 'none';
+        details.style.display = isExpanded ? 'none' : 'block';
+        expandIcon.innerHTML = `<span class="badge bg-dark bg-opacity-75">${isExpanded ? '▼' : '▲'}</span>`;
+      });
+      
+      card.appendChild(imgContainer);
+      card.appendChild(cardBody);
+      col.appendChild(card);
+      
+      return col;
+    }
+    
+    // Sorting function
+    function sortMovies(movies, sortOrder) {
+      const sorted = [...movies];
+      
+      switch (sortOrder) {
+        case 'title-asc':
+          return sorted.sort((a, b) => a.title.localeCompare(b.title));
+        case 'title-desc':
+          return sorted.sort((a, b) => b.title.localeCompare(a.title));
+        case 'suggester-asc':
+          return sorted.sort((a, b) => (a.suggester || 'Anonymous').localeCompare(b.suggester || 'Anonymous'));
+        case 'suggester-desc':
+          return sorted.sort((a, b) => (b.suggester || 'Anonymous').localeCompare(a.suggester || 'Anonymous'));
+        case 'recent':
+          return sorted.sort((a, b) => (b.id || 0) - (a.id || 0)); // Assuming higher ID = more recent
+        case 'oldest':
+          return sorted.sort((a, b) => (a.id || 0) - (b.id || 0));
+        default:
+          return sorted;
+      }
+    }
+    
+    // Initialize sort functionality
+    document.addEventListener('DOMContentLoaded', () => {
+      const sortSelect = document.getElementById('sort-options');
+      if (sortSelect) {
+        sortSelect.addEventListener('change', (e) => {
+          currentSortOrder = e.target.value;
+          // Re-apply current filters with new sort order
+          if (window.applyFilters) {
+            window.applyFilters();
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

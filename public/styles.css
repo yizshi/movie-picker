@@ -84,3 +84,59 @@ body { background: #f8f9fa; }
     box-shadow: 0 0 15px rgba(25, 135, 84, 0.5), 0 0 20px rgba(25, 135, 84, 0.3);
   }
 }
+
+/* Movies page specific styling */
+.movies-page .card {
+  transition: all 0.2s ease;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.movies-page .card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.movies-page .card-img-top {
+  transition: transform 0.3s ease;
+}
+
+.movies-page .card:hover .card-img-top {
+  transform: scale(1.02);
+}
+
+.movie-controls {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  margin-bottom: 1.5rem;
+}
+
+.movie-controls .input-group-text {
+  background: #f8f9fa;
+  border-color: #dee2e6;
+}
+
+.empty-state {
+  background: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Genre badges styling for movies page */
+.movies-page .badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.25rem 0.5rem;
+}
+
+/* Movie card enhancements */
+.movie-card-poster {
+  overflow: hidden;
+  border-radius: 0.375rem 0.375rem 0 0;
+}
+
+.movie-card-body {
+  background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
+}

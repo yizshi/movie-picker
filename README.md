@@ -5,6 +5,7 @@ A comprehensive movie suggestion and ranked voting app for groups to decide what
 ## ✨ Features
 
 ### 🎭 Core Functionality
+- **Movie Browsing**: Browse all suggested movies with search, filtering, and sorting options
 - **Movie Suggestions**: Add movies with IMDB links to automatically fetch posters and genres
 - **Ranked Voting**: Users vote with up to 3 ranked choices using Borda scoring (1st=3pts, 2nd=2pts, 3rd=1pt)
 - **Meeting Management**: Create meetings with candidate dates and movie restrictions
@@ -17,6 +18,8 @@ A comprehensive movie suggestion and ranked voting app for groups to decide what
 - **Environment Protection**: Comprehensive security for sensitive credentials
 
 ### 🎨 User Experience  
+- **Smart Navigation**: Context-aware navigation that only shows relevant options
+- **Advanced Search & Filtering**: Filter movies by title, genre, suggester with multiple sort options
 - **TMDB Integration**: Automatic movie poster and genre fetching from IMDB links
 - **Responsive Design**: Works on desktop and mobile devices
 - **Real-time Results**: Live voting results and meeting status

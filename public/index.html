@@ -29,6 +29,12 @@
     <p class="lead">A small app to suggest movies and hold a ranked vote (top 3).</p>
 
     <div class="list-group mb-4">
+      <a href="/movies.html" class="list-group-item list-group-item-action">
+        <div class="d-flex justify-content-between align-items-center">
+          <span>Browse all movies</span>
+          <span class="badge bg-secondary rounded-pill" id="navMovieCount">0</span>
+        </div>
+      </a>
       <a href="/suggest.html" class="list-group-item list-group-item-action">Suggest a movie</a>
       <a id="vote-nav" href="/vote.html" class="list-group-item list-group-item-action">Vote (top 3)</a>
       <a id="results-nav" href="/results.html" class="list-group-item list-group-item-action">View results</a>
@@ -138,9 +144,19 @@
         
         movieCount.textContent = movies.length;
         document.getElementById('meetingCount').textContent = meetings.length;
+        
+        // Update navigation movie count
+        const navMovieCount = document.getElementById('navMovieCount');
+        if (navMovieCount) {
+          navMovieCount.textContent = movies.length;
+        }
       } catch (err) {
         movieCount.textContent = '?';
         document.getElementById('meetingCount').textContent = '?';
+        const navMovieCount = document.getElementById('navMovieCount');
+        if (navMovieCount) {
+          navMovieCount.textContent = '?';
+        }
       }
     }
 
@@ -212,6 +228,7 @@
     // Initialize admin status check and navigation visibility
     checkAdminStatus();
     updateNavigationVisibility();
+    updateMovieCount();
   </script>
 
   <script src="/app.js?v=2"></script>
