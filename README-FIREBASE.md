@@ -1,6 +1,6 @@
-# Movie Picker - Firebase Setup Guide
+# Distruibued Denail of Screentime - Firebase Setup Guide
 
-This guide will help you migrate your Movie Picker app from SQLite to Firebase/Firestore.
+This guide will help you migrate your Distruibued Denail of Screentime app from SQLite to Firebase/Firestore.
 
 ## 🔧 Prerequisites
 

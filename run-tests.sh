@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🧪 Running Movie Picker Test Suite"
+echo "🧪 Running Distruibued Denail of Screentime Test Suite"
 echo "=================================="
 
 # Colors for output

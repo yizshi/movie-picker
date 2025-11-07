@@ -187,7 +187,7 @@ describe('Movies Page Tests', () => {
     });
     
     test('should have proper page title and navigation', () => {
-      expect(document.title).toBe('All Movies - Movie Picker');
+      expect(document.title).toBe('All Movies - Distruibued Denail of Screentime');
       expect(document.querySelector('h1').textContent).toBe('All Movie Suggestions');
       
       const backLink = document.querySelector('a[href="/"]');

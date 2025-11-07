@@ -1,4 +1,4 @@
-# 🎬 Movie Picker
+# 🎬 Distruibued Denail of Screentime
 
 A comprehensive movie suggestion and ranked voting app for groups to decide what to watch together. Features meeting management, secure admin controls, automatic poster fetching, and flexible deployment options.
 
