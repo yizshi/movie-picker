@@ -30,9 +30,9 @@
 
     <div class="list-group mb-4">
       <a href="/suggest.html" class="list-group-item list-group-item-action">Suggest a movie</a>
-      <a href="/vote.html" class="list-group-item list-group-item-action">Vote (top 3)</a>
-      <a href="/results.html" class="list-group-item list-group-item-action">View results</a>
-      <a href="/watched-list.html" class="list-group-item list-group-item-action">Watched meetings</a>
+      <a id="vote-nav" href="/vote.html" class="list-group-item list-group-item-action">Vote (top 3)</a>
+      <a id="results-nav" href="/results.html" class="list-group-item list-group-item-action">View results</a>
+      <a id="watched-nav" href="/watched-list.html" class="list-group-item list-group-item-action">Watched meetings</a>
     </div>
 
     <!-- Admin section -->
@@ -164,8 +164,54 @@
       }
     });
 
-    // Initialize admin status check
+    // Check meeting states and conditionally show navigation
+    async function updateNavigationVisibility() {
+      try {
+        const response = await fetch('/api/meetings');
+        const meetings = await response.json();
+        
+        // Find meetings in different states
+        const openMeeting = meetings.find(m => m.voting_open === 1);
+        const finishedMeeting = meetings.find(m => m.voting_open === 0);
+        const watchedMeeting = meetings.find(m => m.watched_movie_id);
+        
+        // Show/hide navigation items
+        const voteNav = document.getElementById('vote-nav');
+        const resultsNav = document.getElementById('results-nav');
+        const watchedNav = document.getElementById('watched-nav');
+        
+        if (voteNav) {
+          if (!openMeeting) {
+            voteNav.classList.add('d-none');
+          } else {
+            voteNav.classList.remove('d-none');
+          }
+        }
+        
+        if (resultsNav) {
+          if (!finishedMeeting) {
+            resultsNav.classList.add('d-none');
+          } else {
+            resultsNav.classList.remove('d-none');
+          }
+        }
+        
+        if (watchedNav) {
+          if (!watchedMeeting) {
+            watchedNav.classList.add('d-none');
+          } else {
+            watchedNav.classList.remove('d-none');
+          }
+        }
+      } catch (error) {
+        console.error('Error checking meeting states:', error);
+        // On error, show all navigation items as fallback
+      }
+    }
+
+    // Initialize admin status check and navigation visibility
     checkAdminStatus();
+    updateNavigationVisibility();
   </script>
 
   <script src="/app.js?v=2"></script>
