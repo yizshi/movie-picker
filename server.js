@@ -6,7 +6,7 @@ const Database = require('better-sqlite3');
 const fetch = require('node-fetch');
 const cheerio = require('cheerio');
 
-const DB_PATH = path.join(__dirname, 'moviepicker.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'moviepicker.db');
 const db = new Database(DB_PATH);
 
 // Initialize DB
@@ -698,6 +698,12 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  
-});
+// Only start server if not in test mode
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+// Export app for testing
+module.exports = { app };

@@ -109,6 +109,9 @@ node generate-password-hash.js
 | `npm run deploy:hosting` | Deploy only Firebase hosting |
 | `npm run deploy:functions` | Deploy only Firebase functions |
 | `npm run migrate` | Migrate SQLite data to Firebase |
+| `npm test` | Run test suite |
+| `npm run test:watch` | Run tests in watch mode |
+| `npm run test:coverage` | Generate test coverage report |
 
 ### Project Structure
 
@@ -123,8 +126,15 @@ movie-picker/
 │   └── package.json       # Functions dependencies
 ├── server.js              # Local SQLite server
 ├── server-firebase.js     # Local Firebase server
+├── tests/                 # Test files
+│   ├── auth.test.js       # Authentication tests
+│   ├── api.test.js        # API endpoint tests
+│   ├── voting.test.js     # Voting logic tests
+│   └── setup.js           # Test setup and configuration
+├── .github/workflows/     # GitHub Actions CI/CD
 ├── migrate-to-firebase.js # Migration utility
 ├── generate-password-hash.js # Password hash generator
+├── jest.config.js         # Jest test configuration
 └── set-firebase-env.sh    # Firebase environment setup
 ```
 
@@ -155,6 +165,22 @@ movie-picker/
 # Configure Firebase credentials in .env
 npm run migrate
 ```
+
+### CI/CD Pipeline Setup
+
+This project includes automated GitHub Actions for testing and deployment:
+
+1. **Setup GitHub Secrets** (see [GITHUB_SECRETS_SETUP.md](GITHUB_SECRETS_SETUP.md))
+2. **Push to main branch** to trigger pipeline
+3. **Tests run automatically** on all pull requests
+4. **Deployment happens automatically** when tests pass on main branch
+
+#### Pipeline Features:
+- ✅ **Automated Testing**: Runs full test suite on every push/PR
+- ✅ **Test Coverage**: Generates and uploads coverage reports
+- ✅ **Automated Deployment**: Deploys to Firebase when tests pass
+- ✅ **Environment Management**: Securely handles secrets and configs
+- ✅ **Multi-Environment**: Separate test and production environments
 
 ## 📖 API Documentation
 
@@ -214,6 +240,62 @@ curl -X POST http://localhost:3000/api/votes \
 - **Environment Protection**: Sensitive credentials never exposed in code
 - **Firebase Security Rules**: Proper database access controls
 - **Input Validation**: All API endpoints validate inputs
+
+## 🧪 Testing
+
+### Test Coverage
+
+The project includes comprehensive test suites covering:
+
+- **Authentication Tests**: bcrypt password hashing and verification
+- **API Tests**: All endpoints with various scenarios and edge cases  
+- **Voting Logic Tests**: Borda scoring and date selection algorithms
+- **Integration Tests**: Full request/response cycles with test database
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode (for development)
+npm run test:watch
+
+# Generate coverage report
+npm run test:coverage
+
+# Run Firebase Functions tests
+cd functions && npm test
+```
+
+### Test Structure
+
+```
+tests/
+├── setup.js           # Test configuration and mocks
+├── auth.test.js        # Password hashing and authentication
+├── api.test.js         # API endpoint integration tests
+└── voting.test.js      # Voting algorithm unit tests
+```
+
+### Writing New Tests
+
+Tests use Jest and Supertest. Example:
+
+```javascript
+test('should create movie with valid IMDB link', async () => {
+  const response = await request(app)
+    .post('/api/movies')
+    .send({
+      title: 'Test Movie',
+      poster: 'https://www.imdb.com/title/tt0133093/',
+      suggester: 'Test User'
+    })
+    .expect(200);
+
+  expect(response.body.title).toBe('Test Movie');
+});
+```
 
 ## 🎯 Usage Guide
 

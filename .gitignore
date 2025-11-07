@@ -92,6 +92,12 @@ out/
 # dotenv environment variables file (backup)
 .env.backup
 
+# Test files and coverage
+coverage/
+*.test.db
+tests/*.db
+.nyc_output/
+
 # Local development scripts (optional - remove if you want to track these)
 # test-*.js
 # debug-*.js
