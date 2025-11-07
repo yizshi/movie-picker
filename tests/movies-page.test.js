@@ -113,6 +113,21 @@ describe('Movies Page Tests', () => {
       suggester.className = 'text-muted mb-2';
       suggester.innerHTML = `<small><strong>Suggested by:</strong> ${movie.suggester || 'Anonymous'}</small>`;
       
+      // Notes (always visible now)
+      if (movie.notes) {
+        const notesLabel = document.createElement('strong');
+        notesLabel.className = 'd-block mt-2 text-primary';
+        notesLabel.textContent = 'Notes:';
+        
+        const notes = document.createElement('p');
+        notes.className = 'card-text small mb-2';
+        notes.textContent = movie.notes;
+        notes.style.fontStyle = 'italic';
+        
+        cardBody.appendChild(notesLabel);
+        cardBody.appendChild(notes);
+      }
+      
       const details = document.createElement('div');
       details.className = 'movie-details mt-auto';
       details.style.display = 'none';

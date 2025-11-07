@@ -115,18 +115,28 @@ async function fetchMovieData(movieTitle) {
         const genres = detailData.genres ? detailData.genres.map(g => g.name) : [];
         const posterUrl = posterPath ? `https://image.tmdb.org/t/p/original${posterPath}` : null;
         
+        // Extract additional metadata
+        const metadata = {
+          release_year: detailData.release_date ? new Date(detailData.release_date).getFullYear() : null,
+          runtime: detailData.runtime || null,
+          rating: detailData.vote_average ? parseFloat(detailData.vote_average.toFixed(1)) : null,
+          overview: detailData.overview || null,
+          imdb_id: detailData.imdb_id || null
+        };
+        
         return {
           poster: posterUrl,
-          genres: genres.length > 0 ? genres : null
+          genres: genres.length > 0 ? genres : null,
+          metadata: metadata
         };
       }
     }
 
     // Fallback: return just the poster if detailed fetch failed
     const posterUrl = posterPath ? `https://image.tmdb.org/t/p/original${posterPath}` : null;
-    return { poster: posterUrl, genres: null };
+    return { poster: posterUrl, genres: null, metadata: null };
   } catch (err) {
-    return { poster: null, genres: null };
+    return { poster: null, genres: null, metadata: null };
   }
 }
 

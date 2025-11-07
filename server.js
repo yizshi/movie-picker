@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS movies (
   title TEXT NOT NULL,
   poster TEXT,
   genres TEXT,
+  metadata TEXT,
   notes TEXT,
   suggester TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -171,18 +172,28 @@ async function fetchMovieData(movieTitle) {
         const genres = detailData.genres ? detailData.genres.map(g => g.name) : [];
         const posterUrl = posterPath ? `https://image.tmdb.org/t/p/original${posterPath}` : null;
         
+        // Extract additional metadata
+        const metadata = {
+          release_year: detailData.release_date ? new Date(detailData.release_date).getFullYear() : null,
+          runtime: detailData.runtime || null,
+          rating: detailData.vote_average ? parseFloat(detailData.vote_average.toFixed(1)) : null,
+          overview: detailData.overview || null,
+          imdb_id: detailData.imdb_id || null
+        };
+        
         return {
           poster: posterUrl,
-          genres: genres.length > 0 ? JSON.stringify(genres) : null
+          genres: genres.length > 0 ? JSON.stringify(genres) : null,
+          metadata: JSON.stringify(metadata)
         };
       }
     }
 
     // Fallback: return just the poster if detailed fetch failed
     const posterUrl = posterPath ? `https://image.tmdb.org/t/p/original${posterPath}` : null;
-    return { poster: posterUrl, genres: null };
+    return { poster: posterUrl, genres: null, metadata: null };
   } catch (err) {
-    return { poster: null, genres: null };
+    return { poster: null, genres: null, metadata: null };
   }
 }
 
@@ -212,12 +223,14 @@ app.post('/api/movies', async (req, res) => {
   try {
     let finalPosterUrl = poster;
     let finalGenres = null;
+    let finalMetadata = null;
 
     // If poster contains an IMDB URL, try to fetch via TMDB find endpoint
     if (poster && typeof poster === 'string' && poster.includes('imdb.com')) {
       const movieData = await fetchMovieData(poster);
       if (movieData.poster) finalPosterUrl = movieData.poster;
       if (movieData.genres) finalGenres = movieData.genres;
+      if (movieData.metadata) finalMetadata = movieData.metadata;
     }
 
     // If no poster URL is provided, try to fetch from TMDB using title
@@ -225,10 +238,11 @@ app.post('/api/movies', async (req, res) => {
       const movieData = await fetchMovieData(title);
       if (movieData.poster) finalPosterUrl = movieData.poster;
       if (movieData.genres) finalGenres = movieData.genres;
+      if (movieData.metadata) finalMetadata = movieData.metadata;
     }
 
-    const stmt = db.prepare('INSERT INTO movies (title, poster, genres, notes, suggester) VALUES (?, ?, ?, ?, ?)');
-    const info = stmt.run(title, finalPosterUrl || null, finalGenres || null, notes || null, suggester || null);
+    const stmt = db.prepare('INSERT INTO movies (title, poster, genres, metadata, notes, suggester) VALUES (?, ?, ?, ?, ?, ?)');
+    const info = stmt.run(title, finalPosterUrl || null, finalGenres || null, finalMetadata || null, notes || null, suggester || null);
     const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(info.lastInsertRowid);
     res.json(movie);
   } catch (err) {
@@ -670,6 +684,85 @@ app.post('/api/movies/:id/reviews', (req, res) => {
     res.status(500).json({ error: 'failed to save review' });
   }
 });
+
+// Admin endpoint to backfill metadata for movies
+app.post('/api/admin/backfill-metadata', requireAdmin, async (req, res) => {
+  if (!process.env.TMDB_API_KEY) {
+    return res.status(500).json({ error: 'TMDB API key not configured' });
+  }
+
+  try {
+    const movies = db.prepare(`
+      SELECT id, title 
+      FROM movies 
+      WHERE (metadata IS NULL OR metadata = '')
+      LIMIT 10
+    `).all();
+
+    if (movies.length === 0) {
+      return res.json({ message: 'All movies already have metadata', updated: 0 });
+    }
+
+    const updateStmt = db.prepare('UPDATE movies SET metadata = ? WHERE id = ?');
+    let updated = 0;
+
+    for (const movie of movies) {
+      try {
+        const movieData = await fetchMovieDataByTitle(movie.title);
+        if (movieData && movieData.metadata) {
+          updateStmt.run(movieData.metadata, movie.id);
+          updated++;
+        }
+        // Rate limiting
+        await new Promise(resolve => setTimeout(resolve, 250));
+      } catch (error) {
+        console.error(`Error updating ${movie.title}:`, error.message);
+      }
+    }
+
+    res.json({ message: `Updated ${updated} movies`, updated, total: movies.length });
+  } catch (error) {
+    res.status(500).json({ error: 'Backfill failed: ' + error.message });
+  }
+});
+
+// Helper function for backfill
+async function fetchMovieDataByTitle(movieTitle) {
+  const TMDB_API_KEY = process.env.TMDB_API_KEY;
+  if (!TMDB_API_KEY) return null;
+
+  try {
+    const searchUrl = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(movieTitle)}`;
+    const searchResponse = await fetch(searchUrl, {
+      headers: { 'Authorization': `Bearer ${TMDB_API_KEY}`, 'Accept': 'application/json' }
+    });
+
+    if (!searchResponse.ok) return null;
+    const searchData = await searchResponse.json();
+    if (!searchData.results?.length) return null;
+
+    const movie = searchData.results[0];
+    const detailResponse = await fetch(`https://api.themoviedb.org/3/movie/${movie.id}`, {
+      headers: { 'Authorization': `Bearer ${TMDB_API_KEY}`, 'Accept': 'application/json' }
+    });
+
+    if (detailResponse.ok) {
+      const detailData = await detailResponse.json();
+      return {
+        metadata: JSON.stringify({
+          release_year: detailData.release_date ? new Date(detailData.release_date).getFullYear() : null,
+          runtime: detailData.runtime || null,
+          rating: detailData.vote_average ? parseFloat(detailData.vote_average.toFixed(1)) : null,
+          overview: detailData.overview || null,
+          imdb_id: detailData.imdb_id || null
+        })
+      };
+    }
+  } catch (error) {
+    console.error('TMDB API error:', error);
+  }
+  return null;
+}
 
 // Mark a meeting's watched movie
 app.post('/api/meetings/:id/watched', requireAdmin, (req, res) => {

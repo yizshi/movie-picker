@@ -150,19 +150,54 @@ function createDetailedMovieCard(movie) {
   
   const cardBody = el('div', 'card-body d-flex flex-column');
   
-  // Title
-  const title = el('h6', 'card-title mb-2'); 
-  title.textContent = movie.title;
+  // Title (as clickable IMDB link)
+  const titleContainer = el('h6', 'card-title mb-2'); 
+  
+  // Extract IMDB ID from poster URL or metadata
+  let imdbUrl = null;
+  if (movie.poster && movie.poster.includes('imdb.com')) {
+    imdbUrl = movie.poster;
+  } else if (movie.metadata) {
+    try {
+      const metadata = JSON.parse(movie.metadata);
+      if (metadata.imdb_id) {
+        imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
+      }
+    } catch (e) {}
+  }
+  
+  if (imdbUrl) {
+    const titleLink = el('a');
+    titleLink.href = imdbUrl;
+    titleLink.target = '_blank';
+    titleLink.rel = 'noopener noreferrer';
+    titleLink.textContent = movie.title;
+    titleLink.className = 'movie-title-link';
+    titleLink.title = 'Click to view on IMDB';
+    
+    // Add IMDB external link indicator
+    const linkIconWrapper = el('a', 'imdb-link-icon ms-2 text-decoration-none');
+    linkIconWrapper.href = imdbUrl;
+    linkIconWrapper.target = '_blank';
+    linkIconWrapper.rel = 'noopener noreferrer';
+    linkIconWrapper.innerHTML = '🔗';
+    linkIconWrapper.title = 'View on IMDB';
+    
+    titleContainer.appendChild(titleLink);
+    titleContainer.appendChild(linkIconWrapper);
+  } else {
+    titleContainer.textContent = movie.title;
+  }
   
   // Genres
   const genresHtml = renderGenres(movie.genres);
   if (genresHtml) {
     const genresDiv = el('div', 'mb-2');
     genresDiv.innerHTML = genresHtml;
-    cardBody.appendChild(title);
+    cardBody.appendChild(titleContainer);
     cardBody.appendChild(genresDiv);
   } else {
-    cardBody.appendChild(title);
+    cardBody.appendChild(titleContainer);
   }
   
   // Suggester
@@ -170,17 +205,62 @@ function createDetailedMovieCard(movie) {
   suggester.textContent = movie.suggester ? `Suggested by ${movie.suggester}` : 'Anonymous';
   cardBody.appendChild(suggester);
   
+  // Notes (always visible now)
+  if (movie.notes) {
+    const notesLabel = el('strong', 'd-block mt-2 text-primary'); 
+    notesLabel.textContent = 'Notes:';
+    const notes = el('p', 'card-text small mb-2');
+    notes.textContent = movie.notes;
+    notes.style.fontStyle = 'italic';
+    cardBody.appendChild(notesLabel);
+    cardBody.appendChild(notes);
+  }
+  
   // Collapsible details
   const details = el('div', 'movie-details');
   details.style.display = 'none';
   
-  if (movie.notes) {
-    const notesLabel = el('strong', 'd-block mt-2'); 
-    notesLabel.textContent = 'Notes:';
-    const notes = el('p', 'card-text small');
-    notes.textContent = movie.notes;
-    details.appendChild(notesLabel);
-    details.appendChild(notes);
+  // Movie metadata (similar to movies page)
+  if (movie.metadata) {
+    try {
+      const metadata = JSON.parse(movie.metadata);
+      const metadataDiv = el('div', 'mt-2 pt-2 border-top');
+      
+      let metadataHtml = '<div class="mb-2"><strong class="text-primary">Movie Information</strong></div>';
+      
+      if (metadata.release_year) {
+        metadataHtml += `<small class="text-muted d-block">📅 Year: ${metadata.release_year}</small>`;
+      }
+      
+      if (metadata.runtime) {
+        const hours = Math.floor(metadata.runtime / 60);
+        const minutes = metadata.runtime % 60;
+        const runtimeStr = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+        metadataHtml += `<small class="text-muted d-block">⏱️ Runtime: ${runtimeStr}</small>`;
+      }
+      
+      if (metadata.rating && metadata.rating > 0) {
+        metadataHtml += `<small class="text-muted d-block">⭐ TMDB Rating: ${metadata.rating}/10</small>`;
+      }
+      
+      if (metadata.overview) {
+        const shortOverview = metadata.overview.length > 120 ? 
+          metadata.overview.substring(0, 120) + '...' : metadata.overview;
+        metadataHtml += `
+          <div class="mt-1">
+            <small class="text-muted d-block">📝 Plot: 
+              <span class="plot-text blurred-plot" data-full-plot="${shortOverview.replace(/"/g, '&quot;')}" title="Click to reveal plot">
+                ${shortOverview}
+              </span>
+            </small>
+          </div>`;
+      }
+      
+      metadataDiv.innerHTML = metadataHtml;
+      details.appendChild(metadataDiv);
+    } catch (e) {
+      // Ignore JSON parsing errors
+    }
   }
   
   // Quick select buttons (only on vote page)
@@ -202,6 +282,16 @@ function createDetailedMovieCard(movie) {
   // Click to expand/collapse
   card.addEventListener('click', (e) => {
     if (e.target.tagName === 'BUTTON') return; // Don't toggle on button clicks
+    
+    // Don't toggle if clicking on a link or blurred plot text
+    if (e.target.tagName === 'A' || e.target.closest('a') || e.target.classList.contains('blurred-plot')) {
+      if (e.target.classList.contains('blurred-plot')) {
+        e.stopPropagation();
+        e.target.classList.remove('blurred-plot');
+        e.target.classList.add('revealed');
+      }
+      return;
+    }
     
     const isExpanded = details.style.display !== 'none';
     details.style.display = isExpanded ? 'none' : 'block';

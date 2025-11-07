@@ -174,11 +174,47 @@
       const cardBody = document.createElement('div');
       cardBody.className = 'card-body d-flex flex-column movie-card-body';
       
-      // Title
-      const title = document.createElement('h5');
-      title.className = 'card-title mb-2';
-      title.textContent = movie.title;
-      title.style.lineHeight = '1.2';
+      // Title (as clickable IMDB link)
+      const titleContainer = document.createElement('h5');
+      titleContainer.className = 'card-title mb-2';
+      titleContainer.style.lineHeight = '1.2';
+      
+      // Extract IMDB ID from poster URL or metadata
+      let imdbUrl = null;
+      if (movie.poster && movie.poster.includes('imdb.com')) {
+        imdbUrl = movie.poster;
+      } else if (movie.metadata) {
+        try {
+          const metadata = JSON.parse(movie.metadata);
+          if (metadata.imdb_id) {
+            imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
+          }
+        } catch (e) {}
+      }
+      
+      if (imdbUrl) {
+        const titleLink = document.createElement('a');
+        titleLink.href = imdbUrl;
+        titleLink.target = '_blank';
+        titleLink.rel = 'noopener noreferrer';
+        titleLink.textContent = movie.title;
+        titleLink.className = 'movie-title-link';
+        titleLink.title = 'Click to view on IMDB';
+        
+        // Add IMDB external link indicator
+        const linkIconWrapper = document.createElement('a');
+        linkIconWrapper.href = imdbUrl;
+        linkIconWrapper.target = '_blank';
+        linkIconWrapper.rel = 'noopener noreferrer';
+        linkIconWrapper.className = 'imdb-link-icon ms-2 text-decoration-none';
+        linkIconWrapper.innerHTML = '🔗';
+        linkIconWrapper.title = 'View on IMDB';
+        
+        titleContainer.appendChild(titleLink);
+        titleContainer.appendChild(linkIconWrapper);
+      } else {
+        titleContainer.textContent = movie.title;
+      }
       
       // Genres
       if (movieGenres.length > 0) {
@@ -187,10 +223,10 @@
         genresDiv.innerHTML = movieGenres.map(genre => 
           `<span class="badge bg-light text-dark me-1 mb-1">${genre}</span>`
         ).join('');
-        cardBody.appendChild(title);
+        cardBody.appendChild(titleContainer);
         cardBody.appendChild(genresDiv);
       } else {
-        cardBody.appendChild(title);
+        cardBody.appendChild(titleContainer);
       }
       
       // Suggester
@@ -199,11 +235,7 @@
       suggester.innerHTML = `<small><strong>Suggested by:</strong> ${movie.suggester || 'Anonymous'}</small>`;
       cardBody.appendChild(suggester);
       
-      // Collapsible details
-      const details = document.createElement('div');
-      details.className = 'movie-details mt-auto';
-      details.style.display = 'none';
-      
+      // Notes (always visible now)
       if (movie.notes) {
         const notesLabel = document.createElement('strong');
         notesLabel.className = 'd-block mt-2 text-primary';
@@ -214,23 +246,81 @@
         notes.textContent = movie.notes;
         notes.style.fontStyle = 'italic';
         
-        details.appendChild(notesLabel);
-        details.appendChild(notes);
+        cardBody.appendChild(notesLabel);
+        cardBody.appendChild(notes);
+      }
+      
+      // Collapsible additional details
+      const details = document.createElement('div');
+      details.className = 'movie-details mt-auto';
+      details.style.display = 'none';
+      
+      // Movie metadata
+      if (movie.metadata) {
+        try {
+          const metadata = JSON.parse(movie.metadata);
+          const metadataDiv = document.createElement('div');
+          metadataDiv.className = 'mt-2 pt-2 border-top';
+          
+          let metadataHtml = '<div class="mb-2"><strong class="text-primary">Movie Information</strong></div>';
+          
+          if (metadata.release_year) {
+            metadataHtml += `<small class="text-muted d-block">📅 Year: ${metadata.release_year}</small>`;
+          }
+          
+          if (metadata.runtime) {
+            const hours = Math.floor(metadata.runtime / 60);
+            const minutes = metadata.runtime % 60;
+            const runtimeStr = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+            metadataHtml += `<small class="text-muted d-block">⏱️ Runtime: ${runtimeStr}</small>`;
+          }
+          
+          if (metadata.rating && metadata.rating > 0) {
+            metadataHtml += `<small class="text-muted d-block">⭐ TMDB Rating: ${metadata.rating}/10</small>`;
+          }
+          
+          if (metadata.overview) {
+            const shortOverview = metadata.overview.length > 120 ? 
+              metadata.overview.substring(0, 120) + '...' : metadata.overview;
+            metadataHtml += `
+              <div class="mt-1">
+                <small class="text-muted d-block">📝 Plot: 
+                  <span class="plot-text blurred-plot" data-full-plot="${shortOverview.replace(/"/g, '&quot;')}" title="Click to reveal plot">
+                    ${shortOverview}
+                  </span>
+                </small>
+              </div>`;
+          }
+          
+          metadataDiv.innerHTML = metadataHtml;
+          details.appendChild(metadataDiv);
+        } catch (e) {
+          // Ignore JSON parsing errors
+        }
       }
       
       // Additional info
-      const infoDiv = document.createElement('div');
-      infoDiv.className = 'mt-2 pt-2 border-top';
-      infoDiv.innerHTML = `
-        <small class="text-muted d-block">Movie ID: ${movie.id}</small>
-        ${movie.created_at ? `<small class="text-muted d-block">Added: ${new Date(movie.created_at).toLocaleDateString()}</small>` : ''}
-      `;
-      details.appendChild(infoDiv);
+      if (movie.created_at) {
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'mt-2 pt-2 border-top';
+        infoDiv.innerHTML = `<small class="text-muted d-block">Added: ${new Date(movie.created_at).toLocaleDateString()}</small>`;
+        details.appendChild(infoDiv);
+      }
       
       cardBody.appendChild(details);
       
       // Click to expand/collapse
       card.addEventListener('click', (e) => {
+        // Don't toggle if clicking on a link or blurred plot text
+        if (e.target.tagName === 'A' || e.target.closest('a') || e.target.classList.contains('blurred-plot')) {
+          if (e.target.classList.contains('blurred-plot')) {
+            e.stopPropagation();
+            e.target.classList.remove('blurred-plot');
+            e.target.classList.add('revealed');
+          }
+          return;
+        }
+        
         const isExpanded = details.style.display !== 'none';
         details.style.display = isExpanded ? 'none' : 'block';
         expandIcon.innerHTML = `<span class="badge bg-dark bg-opacity-75">${isExpanded ? '▼' : '▲'}</span>`;

@@ -140,3 +140,102 @@ body { background: #f8f9fa; }
 .movie-card-body {
   background: linear-gradient(to bottom, #ffffff 0%, #fafbfc 100%);
 }
+
+/* Blurred plot text functionality */
+.blurred-plot {
+  filter: blur(4px);
+  cursor: pointer;
+  transition: filter 0.3s ease;
+  user-select: none;
+  background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 50%, #f8f9fa 100%);
+  padding: 2px 4px;
+  border-radius: 3px;
+  position: relative;
+}
+
+.blurred-plot:hover {
+  filter: blur(2px);
+  background: linear-gradient(90deg, #e9ecef 0%, #dee2e6 50%, #e9ecef 100%);
+}
+
+.blurred-plot::before {
+  content: '👁️ Click to reveal';
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  color: #6c757d;
+  background: white;
+  padding: 1px 4px;
+  border-radius: 2px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.blurred-plot:hover::before {
+  opacity: 1;
+}
+
+.plot-text.revealed {
+  filter: none !important;
+  cursor: default;
+  background: none;
+  user-select: text;
+}
+
+.plot-text.revealed:hover {
+  filter: none !important;
+  background: none;
+}
+
+.plot-text.revealed::before {
+  display: none;
+}
+
+/* Movie title link styling */
+.movie-title-link {
+  color: #0066cc !important;
+  text-decoration: none !important;
+  transition: all 0.2s ease;
+  border-bottom: 1px solid transparent;
+}
+
+.movie-title-link:hover {
+  color: #0052a3 !important;
+  text-decoration: none !important;
+  border-bottom: 1px solid #0066cc;
+}
+
+.imdb-link-icon {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.imdb-link-icon:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* Make the entire title area show it's clickable */
+.card-title:has(.movie-title-link) {
+  cursor: pointer;
+}
+
+.card-title:has(.movie-title-link):hover .imdb-link-icon {
+  opacity: 1;
+  animation: pulse-link 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-link {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
