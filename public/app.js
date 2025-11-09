@@ -643,8 +643,16 @@ async function renderResults() {
 
 // Fetch meetings
 async function fetchMeetings() {
-  const res = await fetch('/api/meetings');
-  return await res.json();
+  try {
+    const res = await fetch('/api/meetings');
+    if (!res.ok) {
+      throw new Error(`HTTP error! status: ${res.status}`);
+    }
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching meetings:', error);
+    return []; // Return empty array as fallback
+  }
 }
 
 function renderAvailabilityInputs(container, meeting) {

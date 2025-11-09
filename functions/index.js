@@ -42,10 +42,17 @@ async function getMovies() {
         }
       }
       
+      // Use cached poster URL if available, otherwise use original
+      let posterUrl = data.poster;
+      if (data.poster_cached_data) {
+        posterUrl = `/api/posters/${doc.id}`;
+      }
+      
       return {
         id: doc.id,
         ...data,
-        created_at
+        created_at,
+        poster: posterUrl
       };
     });
     
@@ -209,7 +216,7 @@ function requireAdmin(req, res, next) {
 }
 
 // Admin login
-app.post('/api/admin/login', async (req, res) => {
+app.post('/admin/login', async (req, res) => {
   const { password } = req.body || {};
   
   const isValidPassword = await verifyPassword(password, ADMIN_PASSWORD_HASH, ADMIN_PASSWORD_PLAINTEXT);
@@ -224,13 +231,13 @@ app.post('/api/admin/login', async (req, res) => {
   res.json({ token, expiresIn: ttl });
 });
 
-app.post('/api/admin/logout', (req, res) => {
+app.post('/admin/logout', (req, res) => {
   const token = req.get('X-Admin-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/, '');
   if (token) adminTokens.delete(token);
   res.json({ ok: true });
 });
 
-app.get('/api/admin/me', (req, res) => {
+app.get('/admin/me', (req, res) => {
   const token = req.get('X-Admin-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/, '');
   if (!token) return res.json({ admin: false });
   const exp = adminTokens.get(token);
@@ -242,7 +249,7 @@ app.get('/api/admin/me', (req, res) => {
 });
 
 // Movies endpoints
-app.get('/api/movies', async (req, res) => {
+app.get('/movies', async (req, res) => {
   try {
     const movies = await getMovies();
     res.json(movies);
@@ -251,7 +258,7 @@ app.get('/api/movies', async (req, res) => {
   }
 });
 
-app.post('/api/movies', async (req, res) => {
+app.post('/movies', async (req, res) => {
   const { title, poster, notes, suggester } = req.body;
   if (!title) return res.status(400).json({ error: 'title is required' });
 
@@ -301,7 +308,7 @@ app.post('/api/movies', async (req, res) => {
   }
 });
 
-app.delete('/api/movies/:id', requireAdmin, async (req, res) => {
+app.delete('/movies/:id', requireAdmin, async (req, res) => {
   const id = req.params.id;
   
   try {
@@ -341,7 +348,7 @@ app.delete('/api/movies/:id', requireAdmin, async (req, res) => {
 });
 
 // Meetings endpoints
-app.get('/api/meetings', async (req, res) => {
+app.get('/meetings', async (req, res) => {
   try {
     // Remove orderBy to avoid index requirement issues, sort in memory instead
     const snapshot = await db.collection('meetings').get();
@@ -410,7 +417,7 @@ app.get('/api/meetings', async (req, res) => {
   }
 });
 
-app.get('/api/meetings/:id', async (req, res) => {
+app.get('/meetings/:id', async (req, res) => {
   const id = req.params.id;
   try {
     const doc = await db.collection('meetings').doc(id).get();
@@ -434,7 +441,7 @@ app.get('/api/meetings/:id', async (req, res) => {
   }
 });
 
-app.post('/api/meetings', requireAdmin, async (req, res) => {
+app.post('/meetings', requireAdmin, async (req, res) => {
   const { name, date, candidate_days, allowed_movie_ids, voting_open, watched_movie_id } = req.body;
   
   try {
@@ -460,7 +467,7 @@ app.post('/api/meetings', requireAdmin, async (req, res) => {
   }
 });
 
-app.patch('/api/meetings/:id', requireAdmin, async (req, res) => {
+app.patch('/meetings/:id', requireAdmin, async (req, res) => {
   const id = req.params.id;
   const { voting_open, name, candidate_days, allowed_movie_ids } = req.body || {};
   
@@ -581,7 +588,7 @@ app.patch('/api/meetings/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/meetings/:id', requireAdmin, async (req, res) => {
+app.delete('/meetings/:id', requireAdmin, async (req, res) => {
   const id = req.params.id;
   
   try {
@@ -609,7 +616,7 @@ app.delete('/api/meetings/:id', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/meetings/:id/watched', requireAdmin, async (req, res) => {
+app.post('/meetings/:id/watched', requireAdmin, async (req, res) => {
   const id = req.params.id;
   const { movieId } = req.body;
   
@@ -647,7 +654,7 @@ app.post('/api/meetings/:id/watched', requireAdmin, async (req, res) => {
 });
 
 // Votes endpoints
-app.post('/api/votes', async (req, res) => {
+app.post('/votes', async (req, res) => {
   const { username, ranks, meetingId, availability } = req.body;
   if (!username) return res.status(400).json({ error: 'username is required' });
   if (!Array.isArray(ranks)) return res.status(400).json({ error: 'ranks array is required' });
@@ -693,7 +700,7 @@ app.post('/api/votes', async (req, res) => {
 });
 
 // Results endpoint
-app.get('/api/results', async (req, res) => {
+app.get('/results', async (req, res) => {
   const meetingId = req.query.meetingId;
   
   try {
@@ -752,7 +759,7 @@ app.get('/api/results', async (req, res) => {
 });
 
 // Reviews endpoints
-app.get('/api/movies/:id/reviews', async (req, res) => {
+app.get('/movies/:id/reviews', async (req, res) => {
   const movieId = req.params.id;
   
   try {
@@ -783,7 +790,7 @@ app.get('/api/movies/:id/reviews', async (req, res) => {
   }
 });
 
-app.post('/api/movies/:id/reviews', async (req, res) => {
+app.post('/movies/:id/reviews', async (req, res) => {
   const movieId = req.params.id;
   const { username, score, comment } = req.body || {};
   
@@ -831,5 +838,60 @@ app.post('/api/movies/:id/reviews', async (req, res) => {
   }
 });
 
-// Export the Express app as a Firebase Function
+// Serve cached poster images
+app.get('/posters/:movieId', async (req, res) => {
+  const movieId = req.params.movieId;
+  
+  try {
+    const movieRef = db.collection('movies').doc(movieId);
+    const movieDoc = await movieRef.get();
+    
+    if (!movieDoc.exists) {
+      return res.status(404).json({ error: 'Movie not found' });
+    }
+    
+    const movie = movieDoc.data();
+    
+    // Check if we have cached poster data
+    if (!movie.poster_cached_data) {
+      // If no cached data, redirect to original poster URL
+      if (movie.poster) {
+        return res.redirect(movie.poster);
+      } else {
+        return res.status(404).json({ error: 'No poster available' });
+      }
+    }
+    
+    // Check if cache is still fresh (30 days)
+    const CACHE_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+    const cacheDate = movie.poster_cached_date ? movie.poster_cached_date.toDate() : null;
+    const isExpired = !cacheDate || (Date.now() - cacheDate.getTime()) > CACHE_DURATION_MS;
+    
+    if (isExpired && movie.poster_original_url) {
+      // Cache expired - redirect to original URL for now
+      console.log(`Cache expired for movie ${movieId}, redirecting to original URL`);
+      return res.redirect(movie.poster_original_url);
+    }
+    
+    // Serve cached image
+    const imageBuffer = Buffer.from(movie.poster_cached_data, 'base64');
+    const contentType = movie.poster_cached_content_type || 'image/jpeg';
+    
+    // Set appropriate cache headers
+    res.set({
+      'Content-Type': contentType,
+      'Content-Length': imageBuffer.length,
+      'Cache-Control': 'public, max-age=2592000', // Cache for 30 days
+      'ETag': `"${movie.poster_cached_date ? movie.poster_cached_date.toMillis() : Date.now()}"`
+    });
+    
+    res.send(imageBuffer);
+    
+  } catch (error) {
+    console.error('Error serving cached poster:', error);
+    res.status(500).json({ error: 'Failed to serve poster' });
+  }
+});
+
+// Export the Express app as a Firebase Function  
 exports.api = functions.https.onRequest(app);

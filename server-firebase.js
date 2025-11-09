@@ -65,10 +65,17 @@ async function getMovies() {
         }
       }
       
+      // Use cached poster URL if available, otherwise use original
+      let posterUrl = data.poster;
+      if (data.poster_cached_data) {
+        posterUrl = `/api/posters/${doc.id}`;
+      }
+      
       return {
         id: doc.id,
         ...data,
-        created_at
+        created_at,
+        poster: posterUrl
       };
     });
     
@@ -838,6 +845,62 @@ app.post('/api/movies/:id/reviews', async (req, res) => {
     res.json({ success: true, reviewId: docRef.id, count, average, reviews });
   } catch (error) {
     res.status(500).json({ error: 'failed to save review' });
+  }
+});
+
+// Serve cached poster images
+app.get('/api/posters/:movieId', async (req, res) => {
+  const movieId = req.params.movieId;
+  
+  try {
+    const movieRef = db.collection('movies').doc(movieId);
+    const movieDoc = await movieRef.get();
+    
+    if (!movieDoc.exists) {
+      return res.status(404).json({ error: 'Movie not found' });
+    }
+    
+    const movie = movieDoc.data();
+    
+    // Check if we have cached poster data
+    if (!movie.poster_cached_data) {
+      // If no cached data, redirect to original poster URL
+      if (movie.poster) {
+        return res.redirect(movie.poster);
+      } else {
+        return res.status(404).json({ error: 'No poster available' });
+      }
+    }
+    
+    // Check if cache is still fresh (30 days)
+    const CACHE_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+    const cacheDate = movie.poster_cached_date ? movie.poster_cached_date.toDate() : null;
+    const isExpired = !cacheDate || (Date.now() - cacheDate.getTime()) > CACHE_DURATION_MS;
+    
+    if (isExpired && movie.poster_original_url) {
+      // Cache expired - redirect to original URL for now
+      // Note: In production, you might want to trigger a background refresh here
+      console.log(`Cache expired for movie ${movieId}, redirecting to original URL`);
+      return res.redirect(movie.poster_original_url);
+    }
+    
+    // Serve cached image
+    const imageBuffer = Buffer.from(movie.poster_cached_data, 'base64');
+    const contentType = movie.poster_cached_content_type || 'image/jpeg';
+    
+    // Set appropriate cache headers
+    res.set({
+      'Content-Type': contentType,
+      'Content-Length': imageBuffer.length,
+      'Cache-Control': 'public, max-age=2592000', // Cache for 30 days
+      'ETag': `"${movie.poster_cached_date ? movie.poster_cached_date.toMillis() : Date.now()}"`
+    });
+    
+    res.send(imageBuffer);
+    
+  } catch (error) {
+    console.error('Error serving cached poster:', error);
+    res.status(500).json({ error: 'Failed to serve poster' });
   }
 });
 
