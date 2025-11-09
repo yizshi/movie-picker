@@ -131,7 +131,7 @@
       // Extract genres for filtering
       let movieGenres = [];
       try {
-        movieGenres = movie.genres ? JSON.parse(movie.genres) : [];
+        movieGenres = movie.genres ? (typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres) : [];
       } catch (e) {}
       col.dataset.genres = movieGenres.join(',').toLowerCase();
       
@@ -185,7 +185,7 @@
         imdbUrl = movie.poster;
       } else if (movie.metadata) {
         try {
-          const metadata = JSON.parse(movie.metadata);
+          const metadata = typeof movie.metadata === 'string' ? JSON.parse(movie.metadata) : movie.metadata;
           if (metadata.imdb_id) {
             imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
           }
@@ -258,7 +258,7 @@
       // Movie metadata
       if (movie.metadata) {
         try {
-          const metadata = JSON.parse(movie.metadata);
+          const metadata = typeof movie.metadata === 'string' ? JSON.parse(movie.metadata) : movie.metadata;
           const metadataDiv = document.createElement('div');
           metadataDiv.className = 'mt-2 pt-2 border-top';
           

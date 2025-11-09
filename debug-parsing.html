@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Data Parsing</title>
+</head>
+<body>
+    <h1>Data Parsing Debug</h1>
+    <div id="output"></div>
+
+    <script>
+        // Test SQLite format (string)
+        const sqliteMovie = {
+            metadata: "{\"release_year\":1999,\"runtime\":139,\"rating\":8.4,\"overview\":\"A ticking-time-bomb insomniac and a slippery soap salesman channel primal male aggression into a shocking new form of therapy. Their concept catches on, with underground \\\"fight clubs\\\" forming in every town, until an eccentric gets in the way and ignites an out-of-control spiral toward oblivion.\",\"imdb_id\":\"tt0137523\"}",
+            genres: "[\"Drama\",\"Thriller\"]"
+        };
+
+        // Test Firebase format (object/array)
+        const firebaseMovie = {
+            metadata: {
+                "release_year": 2019,
+                "runtime": 105,
+                "rating": 6.4,
+                "overview": "Nine translators, hired to translate the eagerly awaited final book of a bestselling trilogy, are confined in a luxurious bunker.",
+                "imdb_id": "tt6270534"
+            },
+            genres: ["Mystery", "Thriller"]
+        };
+
+        function testParsing(movie, name) {
+            console.log(`Testing ${name}:`);
+            
+            // Test metadata parsing
+            try {
+                const metadata = typeof movie.metadata === 'string' ? JSON.parse(movie.metadata) : movie.metadata;
+                console.log(`  Metadata IMDB ID: ${metadata.imdb_id}`);
+                console.log(`  Metadata type: ${typeof movie.metadata}`);
+                console.log(`  Parsed metadata:`, metadata);
+            } catch (e) {
+                console.error(`  Metadata parsing failed:`, e);
+            }
+
+            // Test genres parsing
+            try {
+                const genres = typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres;
+                console.log(`  Genres: ${genres.join(', ')}`);
+                console.log(`  Genres type: ${typeof movie.genres}`);
+                console.log(`  Parsed genres:`, genres);
+            } catch (e) {
+                console.error(`  Genres parsing failed:`, e);
+            }
+        }
+
+        testParsing(sqliteMovie, 'SQLite Movie');
+        testParsing(firebaseMovie, 'Firebase Movie');
+
+        // Test IMDB URL generation
+        function generateImdbUrl(movie) {
+            let imdbUrl = null;
+            if (movie.metadata) {
+                try {
+                    const metadata = typeof movie.metadata === 'string' ? JSON.parse(movie.metadata) : movie.metadata;
+                    if (metadata.imdb_id) {
+                        imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
+                    }
+                } catch (e) {
+                    console.error('IMDB URL generation failed:', e);
+                }
+            }
+            return imdbUrl;
+        }
+
+        console.log('SQLite IMDB URL:', generateImdbUrl(sqliteMovie));
+        console.log('Firebase IMDB URL:', generateImdbUrl(firebaseMovie));
+
+        // Output to page
+        document.getElementById('output').innerHTML = 'Check console for results';
+    </script>
+</body>
+</html>

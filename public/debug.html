@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Debug UI Differences</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container py-4">
+        <h1>Debug: UI Differences SQLite vs Firebase</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <h2>SQLite Data Sample</h2>
+                <div id="sqlite-sample"></div>
+            </div>
+            <div class="col-md-6">
+                <h2>Firebase Data Sample</h2>
+                <div id="firebase-sample"></div>
+            </div>
+        </div>
+        
+        <div class="mt-4">
+            <h2>Current API Data</h2>
+            <div id="current-data"></div>
+        </div>
+    </div>
+
+    <script>
+        // Test data structures
+        const sqliteMovie = {
+            "id": 23,
+            "title": "The Fight Club",
+            "poster": "https://image.tmdb.org/t/p/original/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg",
+            "notes": null,
+            "suggester": "Yizhen Shi",
+            "created_at": "2025-11-07 04:03:29",
+            "genres": "[\"Drama\",\"Thriller\"]",
+            "metadata": "{\"release_year\":1999,\"runtime\":139,\"rating\":8.4,\"overview\":\"A ticking-time-bomb insomniac and a slippery soap salesman channel primal male aggression into a shocking new form of therapy. Their concept catches on, with underground \\\"fight clubs\\\" forming in every town, until an eccentric gets in the way and ignites an out-of-control spiral toward oblivion.\",\"imdb_id\":\"tt0137523\"}"
+        };
+
+        const firebaseMovie = {
+            "id": "wv9Osq2RCzeRIPVS9xNv",
+            "title": "Les traducteurs",
+            "poster": "https://image.tmdb.org/t/p/original/8A6qALzfMxgj51ly8KyTCZfXutG.jpg",
+            "genres": ["Mystery", "Thriller"],
+            "metadata": {
+                "release_year": 2019,
+                "runtime": 105,
+                "rating": 6.4,
+                "overview": "Nine translators, hired to translate the eagerly awaited final book of a bestselling trilogy, are confined in a luxurious bunker.",
+                "imdb_id": "tt6270534"
+            },
+            "notes": "plot twist",
+            "suggester": "Yizhen Shi",
+            "created_at": "2025-11-09T00:29:01.000Z"
+        };
+
+        // Test parsing functions
+        function testMovie(movie, containerId, title) {
+            const container = document.getElementById(containerId);
+            
+            let html = `<h4>${title}</h4>`;
+            
+            // Test metadata parsing
+            try {
+                const metadata = typeof movie.metadata === 'string' ? JSON.parse(movie.metadata) : movie.metadata;
+                html += `<p><strong>✅ Metadata parsing:</strong> Success</p>`;
+                html += `<p>IMDB ID: ${metadata.imdb_id}</p>`;
+                html += `<p>Year: ${metadata.release_year}</p>`;
+                html += `<p>Runtime: ${metadata.runtime}min</p>`;
+                html += `<p>Rating: ${metadata.rating}/10</p>`;
+                
+                if (metadata.imdb_id) {
+                    html += `<p><a href="https://www.imdb.com/title/${metadata.imdb_id}" target="_blank">🔗 IMDB Link</a></p>`;
+                }
+            } catch (e) {
+                html += `<p><strong>❌ Metadata parsing:</strong> ${e.message}</p>`;
+            }
+            
+            // Test genres parsing
+            try {
+                const genres = typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres;
+                html += `<p><strong>✅ Genres parsing:</strong> ${genres.join(', ')}</p>`;
+            } catch (e) {
+                html += `<p><strong>❌ Genres parsing:</strong> ${e.message}</p>`;
+            }
+            
+            html += `<hr>`;
+            html += `<pre>${JSON.stringify(movie, null, 2)}</pre>`;
+            
+            container.innerHTML = html;
+        }
+
+        // Test both samples
+        testMovie(sqliteMovie, 'sqlite-sample', 'SQLite Format');
+        testMovie(firebaseMovie, 'firebase-sample', 'Firebase Format');
+        
+        // Fetch current API data
+        fetch('/api/movies')
+            .then(response => response.json())
+            .then(movies => {
+                const container = document.getElementById('current-data');
+                if (movies.length > 0) {
+                    testMovie(movies[0], 'current-data', `Current API Data (${movies.length} movies total)`);
+                } else {
+                    container.innerHTML = '<p>No movies found</p>';
+                }
+            })
+            .catch(error => {
+                document.getElementById('current-data').innerHTML = `<p>Error: ${error.message}</p>`;
+            });
+    </script>
+</body>
+</html>

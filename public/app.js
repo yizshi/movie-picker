@@ -127,7 +127,7 @@ function createDetailedMovieCard(movie) {
   // Extract genres for filtering
   let movieGenres = [];
   try {
-    movieGenres = movie.genres ? JSON.parse(movie.genres) : [];
+    movieGenres = movie.genres ? (typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres) : [];
   } catch (e) {}
   col.dataset.genres = movieGenres.join(',').toLowerCase();
   
@@ -159,7 +159,7 @@ function createDetailedMovieCard(movie) {
     imdbUrl = movie.poster;
   } else if (movie.metadata) {
     try {
-      const metadata = JSON.parse(movie.metadata);
+      const metadata = typeof movie.metadata === 'string' ? JSON.parse(movie.metadata) : movie.metadata;
       if (metadata.imdb_id) {
         imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
       }
@@ -223,7 +223,7 @@ function createDetailedMovieCard(movie) {
   // Movie metadata (similar to movies page)
   if (movie.metadata) {
     try {
-      const metadata = JSON.parse(movie.metadata);
+      const metadata = typeof movie.metadata === 'string' ? JSON.parse(movie.metadata) : movie.metadata;
       const metadataDiv = el('div', 'mt-2 pt-2 border-top');
       
       let metadataHtml = '<div class="mb-2"><strong class="text-primary">Movie Information</strong></div>';
@@ -508,7 +508,7 @@ function populateFilterOptions() {
   
   originalMoviesData.forEach(movie => {
     try {
-      const genres = movie.genres ? JSON.parse(movie.genres) : [];
+      const genres = movie.genres ? (typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres) : [];
       genres.forEach(genre => allGenres.add(genre));
     } catch (e) {}
     
@@ -553,7 +553,7 @@ function applyFilters() {
     let matchesGenre = true;
     if (selectedGenre) {
       try {
-        const genres = movie.genres ? JSON.parse(movie.genres) : [];
+        const genres = movie.genres ? (typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres) : [];
         matchesGenre = genres.includes(selectedGenre);
       } catch (e) {
         matchesGenre = false;
