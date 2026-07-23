@@ -34,6 +34,14 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+// TMDB serves multiple poster sizes. Cards render at ~200-300px wide, so w500
+// is plenty (~35KB vs ~200KB for `original`). Rewrites both new and existing
+// URLs on the way out so old rows benefit without a data migration.
+function optimizePosterUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  return url.replace('/t/p/original/', '/t/p/w500/');
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -65,8 +73,7 @@ async function getMovies() {
         }
       }
       
-      // Use TMDB poster URL directly (no caching overhead)
-      const posterUrl = data.poster;
+      const posterUrl = optimizePosterUrl(data.poster);
 
       // Handle backward compatibility and format suggestions
       let suggestions = [];
@@ -189,7 +196,7 @@ async function fetchMovieData(movieTitle) {
       if (detailResponse.ok) {
         const detailData = await detailResponse.json();
         const genres = detailData.genres ? detailData.genres.map(g => g.name) : [];
-        const posterUrl = posterPath ? `https://image.tmdb.org/t/p/original${posterPath}` : null;
+        const posterUrl = posterPath ? `https://image.tmdb.org/t/p/w500${posterPath}` : null;
         
         // Extract additional metadata
         const metadata = {
@@ -209,7 +216,7 @@ async function fetchMovieData(movieTitle) {
     }
 
     // Fallback: return just the poster if detailed fetch failed
-    const posterUrl = posterPath ? `https://image.tmdb.org/t/p/original${posterPath}` : null;
+    const posterUrl = posterPath ? `https://image.tmdb.org/t/p/w500${posterPath}` : null;
     return { poster: posterUrl, genres: null, metadata: null };
   } catch (err) {
     return { poster: null, genres: null, metadata: null };
@@ -505,7 +512,10 @@ app.get('/api/meetings', async (req, res) => {
     ]);
 
     const watchedById = new Map(
-      watchedDocs.filter(d => d.exists).map(d => [d.id, { id: d.id, ...d.data() }])
+      watchedDocs.filter(d => d.exists).map(d => {
+        const data = d.data();
+        return [d.id, { id: d.id, ...data, poster: optimizePosterUrl(data.poster) }];
+      })
     );
 
     const dateCountsByMeeting = new Map();
