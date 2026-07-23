@@ -278,7 +278,7 @@ npm run start:firebase   # or :sqlite
 
 ### Public endpoints
 - `GET /api/movies` — list movies
-- `POST /api/movies` — suggest a movie (IMDB link auto-fetches poster + genres)
+- `POST /api/movies` — suggest a movie. Accepts either `tmdb_id` (preferred, from `/api/tmdb/search`) or a legacy `poster` field containing an IMDB URL
 - `GET /api/meetings` — list meetings with vote counts
 - `GET /api/meetings/:id` — meeting details
 - `POST /api/votes` — submit ranked ballot + availability
@@ -287,6 +287,7 @@ npm run start:firebase   # or :sqlite
 - `GET /api/movies/:id/reviews` — reviews for a movie
 - `POST /api/movies/:id/reviews` — add a review (0-10)
 - `GET /api/posters/:movieId` — cached poster image proxy
+- `GET /api/tmdb/search?q=<query>` — search TMDB by title (used by the suggest picker)
 
 ### Admin endpoints (require authentication)
 - `POST /api/admin/login` / `POST /api/admin/logout` / `GET /api/admin/me`

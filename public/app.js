@@ -1408,34 +1408,42 @@ if (suggestForm) {
       submitBtn.textContent = 'Submitting...';
     }
     
-    const title = document.getElementById('suggest-title').value.trim();
-    const poster = document.getElementById('suggest-poster').value.trim();
     const notes = document.getElementById('suggest-notes').value.trim();
     const suggester = document.getElementById('suggest-name').value.trim();
     const msg = document.getElementById('suggest-msg');
     msg.textContent = '';
     msg.className = 'mt-2';
-    
-    if (!title) { 
-      msg.textContent = 'Title required'; 
+
+    // New picker-based flow: suggest.html exposes the selected TMDB result
+    // via window.__getSuggestedMovie(). Fall back to the legacy inputs if
+    // the page is an older layout.
+    const picked = typeof window.__getSuggestedMovie === 'function' ? window.__getSuggestedMovie() : null;
+    const legacyTitleEl = document.getElementById('suggest-title');
+    const legacyPosterEl = document.getElementById('suggest-poster');
+
+    let body;
+    if (picked) {
+      body = { tmdb_id: picked.tmdb_id, title: picked.title, notes, suggester };
+    } else if (legacyTitleEl && legacyPosterEl) {
+      const title = legacyTitleEl.value.trim();
+      const poster = legacyPosterEl.value.trim();
+      if (!title) { msg.textContent = 'Title required'; msg.className = 'mt-2 text-danger'; return; }
+      const imdbRe = /imdb\.com\/title\/(tt\d+)/i;
+      if (!poster || !imdbRe.test(poster)) {
+        msg.textContent = 'Poster must be an IMDB movie link (https://www.imdb.com/title/tt...)';
+        msg.className = 'mt-2 text-danger';
+        return;
+      }
+      body = { title, poster, notes, suggester };
+    } else {
+      msg.textContent = 'Please pick a movie first.';
       msg.className = 'mt-2 text-danger';
-      return; 
+      return;
     }
-    
-    // enforce IMDB link
-    const imdbRe = /imdb\.com\/title\/(tt\d+)/i;
-    if (!poster || !imdbRe.test(poster)) { 
-      msg.textContent = 'Poster must be an IMDB movie link (https://www.imdb.com/title/tt...)'; 
-      msg.className = 'mt-2 text-danger';
-      return; 
-    }
-    
-    // Update button text to indicate poster loading
-    if (submitBtn) {
-      submitBtn.textContent = 'Loading poster...';
-    }
-    
-    const res = await fetch(`${API_BASE}/movies`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title, poster, notes, suggester }) });
+
+    if (submitBtn) submitBtn.textContent = 'Submitting…';
+
+    const res = await fetch(`${API_BASE}/movies`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     invalidateMoviesCache();
     
     if (!res.ok) {

@@ -233,11 +233,72 @@ async function fetchMovieData(movieTitle) {
   }
 }
 
+// Search TMDB by title. Returns a lightweight shape for a picker UI.
+async function searchTmdb(query) {
+  const TMDB_API_KEY = process.env.TMDB_API_KEY;
+  if (!TMDB_API_KEY || !query) return [];
+  const url = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&include_adult=false`;
+  const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${TMDB_API_KEY}`, 'Accept': 'application/json' } });
+  if (!resp.ok) return [];
+  const data = await resp.json();
+  return (data.results || []).slice(0, 10).map(m => ({
+    tmdb_id: m.id,
+    title: m.title,
+    year: m.release_date ? new Date(m.release_date).getFullYear() : null,
+    poster: m.poster_path ? `https://image.tmdb.org/t/p/w185${m.poster_path}` : null,
+    overview: m.overview || null
+  }));
+}
+
+// Fetch full detail for a TMDB movie id. One round trip, returns the same
+// shape as fetchMovieData() so downstream storage code is unchanged.
+async function fetchMovieDataByTmdbId(tmdbId) {
+  const TMDB_API_KEY = process.env.TMDB_API_KEY;
+  if (!TMDB_API_KEY || !tmdbId) return { poster: null, genres: null, metadata: null };
+  try {
+    const resp = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}`, {
+      headers: { 'Authorization': `Bearer ${TMDB_API_KEY}`, 'Accept': 'application/json' }
+    });
+    if (!resp.ok) return { poster: null, genres: null, metadata: null };
+    const d = await resp.json();
+    const posterUrl = d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : null;
+    const genres = d.genres ? d.genres.map(g => g.name) : [];
+    const metadata = {
+      release_year: d.release_date ? new Date(d.release_date).getFullYear() : null,
+      runtime: d.runtime || null,
+      rating: d.vote_average ? parseFloat(d.vote_average.toFixed(1)) : null,
+      overview: d.overview || null,
+      imdb_id: d.imdb_id || null
+    };
+    return {
+      poster: posterUrl,
+      genres: genres.length > 0 ? JSON.stringify(genres) : null,
+      metadata: JSON.stringify(metadata),
+      imdb_id: d.imdb_id || null,
+      title: d.title || null
+    };
+  } catch (err) {
+    return { poster: null, genres: null, metadata: null };
+  }
+}
+
 // Legacy function for backward compatibility
 async function fetchMoviePoster(movieTitle) {
   const data = await fetchMovieData(movieTitle);
   return data.poster;
 }
+
+// TMDB search proxy — used by the suggest picker. Keeps the API key server-side.
+app.get('/api/tmdb/search', async (req, res) => {
+  const q = (req.query.q || '').toString().trim();
+  if (!q) return res.json([]);
+  try {
+    res.json(await searchTmdb(q));
+  } catch (err) {
+    console.error('TMDB search error:', err);
+    res.status(500).json({ error: 'TMDB search failed' });
+  }
+});
 
 // GET all movies. Admins with a valid token may pass ?include_hidden=true
 // to see hidden movies as well; otherwise hidden rows are filtered out.
@@ -250,17 +311,31 @@ app.get('/api/movies', (req, res) => {
 
 // Add a suggestion with automatic poster fetching from TMDB
 app.post('/api/movies', async (req, res) => {
-  const { title, poster, notes, suggester } = req.body;
-  if (!title) return res.status(400).json({ error: 'title is required' });
+  const { title: bodyTitle, poster, notes, suggester, tmdb_id } = req.body;
 
-  // Require poster to be an IMDB link
-  const imdbMatch = poster && typeof poster === 'string' && poster.match(/imdb\.com\/title\/(tt\d+)/i);
-  if (!imdbMatch) {
-    return res.status(400).json({ error: 'poster must be an IMDB movie link (https://www.imdb.com/title/tt...)' });
+  // Accept either tmdb_id (from the search picker) OR an IMDB URL in `poster`
+  // (legacy path, still supported for backward compat).
+  let imdbId = null;
+  let title = bodyTitle;
+  let tmdbDetail = null;
+
+  if (tmdb_id) {
+    tmdbDetail = await fetchMovieDataByTmdbId(tmdb_id);
+    if (!tmdbDetail || !tmdbDetail.imdb_id) {
+      return res.status(400).json({ error: 'Could not resolve movie from TMDB' });
+    }
+    imdbId = tmdbDetail.imdb_id;
+    title = title || tmdbDetail.title;
+  } else {
+    if (!title) return res.status(400).json({ error: 'title is required' });
+    const imdbMatch = poster && typeof poster === 'string' && poster.match(/imdb\.com\/title\/(tt\d+)/i);
+    if (!imdbMatch) {
+      return res.status(400).json({ error: 'must provide either tmdb_id or an IMDB movie link' });
+    }
+    imdbId = imdbMatch[1];
   }
 
   try {
-    const imdbId = imdbMatch[1];
     
     // Check if a movie with this IMDB ID already exists
     const existingMovie = db.prepare('SELECT * FROM movies WHERE imdb_id = ?').get(imdbId);
@@ -303,22 +378,14 @@ app.post('/api/movies', async (req, res) => {
       return res.json(formatMovieRow(updatedMovie));
     }
 
-    // Movie doesn't exist, create new one
-    let finalPosterUrl = poster;
+    // Movie doesn't exist — use TMDB detail we already fetched (via tmdb_id path)
+    // or look it up now (legacy IMDB-URL path).
+    let finalPosterUrl = null;
     let finalGenres = null;
     let finalMetadata = null;
 
-    // If poster contains an IMDB URL, try to fetch via TMDB find endpoint
-    if (poster && typeof poster === 'string' && poster.includes('imdb.com')) {
-      const movieData = await fetchMovieData(poster);
-      if (movieData.poster) finalPosterUrl = movieData.poster;
-      if (movieData.genres) finalGenres = movieData.genres;
-      if (movieData.metadata) finalMetadata = movieData.metadata;
-    }
-
-    // If no poster URL is provided, try to fetch from TMDB using title
-    if (!finalPosterUrl) {
-      const movieData = await fetchMovieData(title);
+    const movieData = tmdbDetail || await fetchMovieData(poster || title);
+    if (movieData) {
       if (movieData.poster) finalPosterUrl = movieData.poster;
       if (movieData.genres) finalGenres = movieData.genres;
       if (movieData.metadata) finalMetadata = movieData.metadata;

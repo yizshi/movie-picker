@@ -24,22 +24,112 @@
         <label class="form-label">Your name</label>
         <input type="text" id="suggest-name" class="form-control" placeholder="Your name">
       </div>
-      <div class="mb-2">
-        <label class="form-label">Title</label>
-        <input type="text" id="suggest-title" class="form-control" placeholder="Movie title" required>
-      </div>
-      <div class="mb-2">
-        <label class="form-label">IMDB Link (required)</label>
-        <input type="url" id="suggest-poster" class="form-control" placeholder="Paste an IMDB movie link (https://www.imdb.com/title/tt...)" required>
-        <div class="form-text">Please paste the IMDB movie link (e.g. https://www.imdb.com/title/tt...). Poster will be fetched automatically from TMDB.</div>
+      <div class="mb-2 position-relative">
+        <label class="form-label">Movie</label>
+        <input type="text" id="movie-picker-input" class="form-control" placeholder="Start typing a movie title..." autocomplete="off" required>
+        <div id="movie-picker-results" class="list-group position-absolute w-100 shadow-sm" style="z-index: 1000; max-height: 400px; overflow-y: auto; display: none;"></div>
+        <div id="movie-picker-selected" class="mt-2" style="display: none;"></div>
+        <div class="form-text">Search TMDB by title. Poster, year, and IMDB id are pulled automatically.</div>
       </div>
       <div class="mb-2">
         <label class="form-label">Notes</label>
         <textarea id="suggest-notes" class="form-control" rows="2" placeholder="Why do you recommend it?"></textarea>
       </div>
-      <button class="btn btn-primary" type="submit">Submit suggestion</button>
+      <button class="btn btn-primary" type="submit" id="suggest-submit" disabled>Submit suggestion</button>
       <div id="suggest-msg" class="mt-2"></div>
     </form>
+
+    <script>
+      (function() {
+        const input = document.getElementById('movie-picker-input');
+        const resultsBox = document.getElementById('movie-picker-results');
+        const selectedBox = document.getElementById('movie-picker-selected');
+        const submitBtn = document.getElementById('suggest-submit');
+        let selected = null; // { tmdb_id, title, year, poster }
+        let searchAbort = null;
+        let debounceTimer = null;
+
+        function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+        function clearSelection() {
+          selected = null;
+          selectedBox.style.display = 'none';
+          selectedBox.innerHTML = '';
+          submitBtn.disabled = true;
+        }
+
+        function pick(item) {
+          selected = item;
+          resultsBox.style.display = 'none';
+          resultsBox.innerHTML = '';
+          input.value = item.title + (item.year ? ` (${item.year})` : '');
+          selectedBox.style.display = 'block';
+          selectedBox.innerHTML = `
+            <div class="d-flex align-items-center gap-3 p-2 border rounded bg-light">
+              ${item.poster ? `<img src="${escapeHtml(item.poster)}" alt="" style="width: 60px; height: auto; border-radius: 4px;">` : ''}
+              <div class="flex-grow-1">
+                <strong>${escapeHtml(item.title)}</strong>${item.year ? ` <span class="text-muted">(${item.year})</span>` : ''}
+                ${item.overview ? `<div class="small text-muted">${escapeHtml(item.overview.slice(0, 140))}${item.overview.length > 140 ? '…' : ''}</div>` : ''}
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="clear-selection">Change</button>
+            </div>`;
+          selectedBox.querySelector('#clear-selection').addEventListener('click', () => {
+            clearSelection();
+            input.value = '';
+            input.focus();
+          });
+          submitBtn.disabled = false;
+        }
+
+        async function runSearch(q) {
+          if (searchAbort) searchAbort.abort();
+          searchAbort = new AbortController();
+          try {
+            const resp = await fetch(`/api/tmdb/search?q=${encodeURIComponent(q)}`, { signal: searchAbort.signal });
+            if (!resp.ok) return;
+            const results = await resp.json();
+            if (!Array.isArray(results) || results.length === 0) {
+              resultsBox.innerHTML = '<div class="list-group-item text-muted">No matches.</div>';
+              resultsBox.style.display = 'block';
+              return;
+            }
+            resultsBox.innerHTML = results.map((r, i) => `
+              <button type="button" class="list-group-item list-group-item-action d-flex align-items-center gap-3" data-idx="${i}">
+                ${r.poster ? `<img src="${escapeHtml(r.poster)}" alt="" style="width: 40px; height: auto; border-radius: 3px; flex-shrink: 0;">` : '<div style="width: 40px;"></div>'}
+                <div class="text-start">
+                  <div><strong>${escapeHtml(r.title)}</strong>${r.year ? ` <span class="text-muted">(${r.year})</span>` : ''}</div>
+                  ${r.overview ? `<div class="small text-muted">${escapeHtml(r.overview.slice(0, 100))}${r.overview.length > 100 ? '…' : ''}</div>` : ''}
+                </div>
+              </button>`).join('');
+            resultsBox.style.display = 'block';
+            resultsBox.querySelectorAll('button[data-idx]').forEach(btn => {
+              btn.addEventListener('click', () => pick(results[Number(btn.dataset.idx)]));
+            });
+          } catch (err) {
+            if (err.name !== 'AbortError') console.error('search failed:', err);
+          }
+        }
+
+        input.addEventListener('input', () => {
+          if (selected) clearSelection();
+          const q = input.value.trim();
+          clearTimeout(debounceTimer);
+          if (q.length < 2) {
+            resultsBox.style.display = 'none';
+            resultsBox.innerHTML = '';
+            return;
+          }
+          debounceTimer = setTimeout(() => runSearch(q), 300);
+        });
+
+        document.addEventListener('click', (e) => {
+          if (!resultsBox.contains(e.target) && e.target !== input) resultsBox.style.display = 'none';
+        });
+
+        // Expose selection to app.js's suggest handler
+        window.__getSuggestedMovie = () => selected;
+      })();
+    </script>
 
     <h3 class="mt-4">All suggestions</h3>
     
