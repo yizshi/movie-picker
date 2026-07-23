@@ -485,72 +485,68 @@ app.delete('/api/movies/:id', requireAdmin, async (req, res) => {
 // Meetings endpoints
 app.get('/api/meetings', async (req, res) => {
   try {
-    // Remove orderBy to avoid index requirement issues, sort in memory instead
     const snapshot = await db.collection('meetings').get();
-    const meetings = [];
-    
-    for (const doc of snapshot.docs) {
-      const meeting = {
-        id: doc.id,
-        ...doc.data()
-      };
-      
-      // Get watched movie data if exists
-      if (meeting.watched_movie_id) {
-        try {
-          const movieDoc = await db.collection('movies').doc(meeting.watched_movie_id).get();
-          meeting.watched_movie = movieDoc.exists ? { id: movieDoc.id, ...movieDoc.data() } : null;
-        } catch (e) {
-          meeting.watched_movie = null;
-        }
-      } else {
-        meeting.watched_movie = null;
+    const meetings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), watched_movie: null, date_counts: [] }));
+
+    if (meetings.length === 0) return res.json([]);
+
+    // Batch: all watched movies in one round trip, all ballots in chunks of 30
+    // (Firestore `in` limit). Previously did O(M) serial reads = ~200ms * M.
+    const watchedIds = [...new Set(meetings.map(m => m.watched_movie_id).filter(Boolean))];
+    const meetingIds = meetings.map(m => m.id);
+
+    const [watchedDocs, ballotChunks] = await Promise.all([
+      watchedIds.length > 0
+        ? db.getAll(...watchedIds.map(id => db.collection('movies').doc(id)))
+        : Promise.resolve([]),
+      Promise.all(chunk(meetingIds, 30).map(ids =>
+        db.collection('ballots').where('meeting_id', 'in', ids).get()
+      ))
+    ]);
+
+    const watchedById = new Map(
+      watchedDocs.filter(d => d.exists).map(d => [d.id, { id: d.id, ...d.data() }])
+    );
+
+    const dateCountsByMeeting = new Map();
+    for (const snap of ballotChunks) {
+      for (const bDoc of snap.docs) {
+        const ballot = bDoc.data();
+        const mId = ballot.meeting_id;
+        if (!Array.isArray(ballot.availability)) continue;
+        let counts = dateCountsByMeeting.get(mId);
+        if (!counts) { counts = {}; dateCountsByMeeting.set(mId, counts); }
+        for (const date of ballot.availability) counts[date] = (counts[date] || 0) + 1;
       }
-      
-      // Compute vote counts per candidate day
-      try {
-        const ballotsSnapshot = await db.collection('ballots')
-          .where('meeting_id', '==', doc.id)
-          .get();
-        
-        const dateCounts = {};
-        ballotsSnapshot.forEach(ballotDoc => {
-          const ballot = ballotDoc.data();
-          if (ballot.availability && Array.isArray(ballot.availability)) {
-            ballot.availability.forEach(date => {
-              dateCounts[date] = (dateCounts[date] || 0) + 1;
-            });
-          }
-        });
-        
-        meeting.date_counts = Object.entries(dateCounts)
-          .map(([date, count]) => ({ date, count }))
-          .sort((a, b) => b.count - a.count);
-      } catch (e) {
-        meeting.date_counts = [];
-      }
-      
-      meetings.push(meeting);
     }
-    
-    // Sort meetings in memory by date desc, then created_at desc
+
+    for (const m of meetings) {
+      if (m.watched_movie_id) m.watched_movie = watchedById.get(m.watched_movie_id) || null;
+      const counts = dateCountsByMeeting.get(m.id) || {};
+      m.date_counts = Object.entries(counts).map(([date, count]) => ({ date, count })).sort((a, b) => b.count - a.count);
+    }
+
     meetings.sort((a, b) => {
       if (a.date && b.date) return b.date.localeCompare(a.date);
       if (a.date && !b.date) return -1;
       if (!a.date && b.date) return 1;
-      
-      // Fallback to created_at if available
       const aTime = a.created_at && a.created_at._seconds ? a.created_at._seconds : 0;
       const bTime = b.created_at && b.created_at._seconds ? b.created_at._seconds : 0;
       return bTime - aTime;
     });
-    
+
     res.json(meetings);
   } catch (error) {
     console.error('Error fetching meetings:', error);
     res.status(500).json({ error: 'Failed to fetch meetings' });
   }
 });
+
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 app.get('/api/meetings/:id', async (req, res) => {
   const id = req.params.id;
