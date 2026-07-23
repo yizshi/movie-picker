@@ -104,9 +104,12 @@
         <div id="movieSection" class="hidden">
             <div class="d-flex justify-content-between align-items-center px-3 pb-2">
                 <small class="text-muted" id="movieCountLabel"></small>
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="showHiddenToggle" onchange="loadMovies()">
-                    <label class="form-check-label" for="showHiddenToggle">Show hidden movies</label>
+                <div class="d-flex align-items-center gap-3">
+                    <button type="button" class="btn btn-warning btn-sm" id="hideAllBtn" onclick="hideAllMovies()">Hide all visible</button>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showHiddenToggle" onchange="loadMovies()">
+                        <label class="form-check-label" for="showHiddenToggle">Show hidden movies</label>
+                    </div>
                 </div>
             </div>
             <div class="movie-list" id="movieList">
@@ -231,6 +234,33 @@
                     </div>
                 `}).join('');
             } catch (err) {
+            }
+        }
+
+        // Bulk-hide every currently visible movie.
+        async function hideAllMovies() {
+            if (!adminToken) { alert('You must be logged in as admin'); return; }
+            if (!confirm('Hide all currently visible movies? Existing suggestions are kept and can be unhidden individually.')) return;
+            const btn = document.getElementById('hideAllBtn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Hiding…'; }
+            try {
+                const response = await fetch('/api/movies/hide-all', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${adminToken}` }
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    if (response.status === 401) { alert('Your admin session has expired. Please log in again.'); hideAdminUI(); return; }
+                    alert(data?.error || 'Failed to hide all movies');
+                    return;
+                }
+                try { sessionStorage.removeItem('moviesCache'); } catch (e) {}
+                await loadMovies();
+                alert(`Hid ${data.hidden ?? 0} movie(s).`);
+            } catch (err) {
+                alert('Error hiding all movies');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Hide all visible'; }
             }
         }
 

@@ -94,6 +94,10 @@ if (!movieColNames.includes('suggestions')) {
   db.prepare('ALTER TABLE movies ADD COLUMN suggestions TEXT').run();
 }
 
+if (!movieColNames.includes('hidden')) {
+  db.prepare('ALTER TABLE movies ADD COLUMN hidden INTEGER DEFAULT 0').run();
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -116,6 +120,7 @@ function formatMovieRow(movie) {
   return {
     ...movie,
     suggestions,
+    hidden: !!movie.hidden,
     // Flat suggester/notes for backward compatibility with existing frontend + API consumers
     suggester: suggestions.length > 0 ? suggestions[0].suggester : null,
     notes: suggestions.length > 0 ? suggestions[0].notes : null
@@ -234,10 +239,13 @@ async function fetchMoviePoster(movieTitle) {
   return data.poster;
 }
 
-// GET all movies
+// GET all movies. Admins with a valid token may pass ?include_hidden=true
+// to see hidden movies as well; otherwise hidden rows are filtered out.
 app.get('/api/movies', (req, res) => {
   const movies = getMovies();
-  res.json(movies);
+  const isAdmin = verifyAdminToken(extractToken(req));
+  const includeHidden = isAdmin && req.query.include_hidden === 'true';
+  res.json(includeHidden ? movies : movies.filter(m => !m.hidden));
 });
 
 // Add a suggestion with automatic poster fetching from TMDB
@@ -370,6 +378,41 @@ app.post('/api/votes', (req, res) => {
     res.json({ success: true, ballotId });
   } catch (err) {
     res.status(400).json({ error: err.message || 'failed to save votes' });
+  }
+});
+
+// List ballots for a meeting (used by admin drill-in page).
+app.get('/api/votes', (req, res) => {
+  const meetingId = req.query.meetingId;
+  if (!meetingId) return res.status(400).json({ error: 'meetingId query parameter is required' });
+  try {
+    const ballots = db.prepare('SELECT * FROM ballots WHERE meeting_id = ? ORDER BY created_at DESC').all(meetingId);
+    const voteStmt = db.prepare('SELECT movie_id, rank FROM ballot_votes WHERE ballot_id = ? ORDER BY rank ASC');
+    const votes = ballots.map(b => ({
+      id: b.id,
+      username: b.username,
+      meeting_id: b.meeting_id,
+      availability: b.availability ? (() => { try { return JSON.parse(b.availability); } catch (e) { return []; } })() : [],
+      created_at: b.created_at,
+      ranks: voteStmt.all(b.id).map(v => ({ rank: v.rank, movieId: v.movie_id }))
+    }));
+    res.json(votes);
+  } catch (err) {
+    console.error('Error fetching votes:', err);
+    res.status(500).json({ error: 'Failed to fetch votes' });
+  }
+});
+
+// Delete a ballot (admin only). ballot_votes cascade via FK.
+app.delete('/api/votes/:id', requireAdmin, (req, res) => {
+  const id = req.params.id;
+  try {
+    const info = db.prepare('DELETE FROM ballots WHERE id = ?').run(id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Vote not found' });
+    res.json({ success: true, message: 'Vote deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting vote:', err);
+    res.status(500).json({ error: 'Failed to delete vote' });
   }
 });
 
@@ -705,6 +748,32 @@ app.patch('/api/meetings/:id', requireAdmin, (req, res) => {
   }
 });
 
+// Bulk-hide every currently-visible movie (admin only).
+app.post('/api/movies/hide-all', requireAdmin, (req, res) => {
+  try {
+    const result = db.prepare('UPDATE movies SET hidden = 1 WHERE hidden = 0 OR hidden IS NULL').run();
+    res.json({ hidden: result.changes });
+  } catch (err) {
+    console.error('Error hiding all movies:', err);
+    res.status(500).json({ error: 'Failed to hide all movies' });
+  }
+});
+
+// Toggle visibility of a single movie (admin only).
+app.patch('/api/movies/:id/visibility', requireAdmin, (req, res) => {
+  const id = req.params.id;
+  try {
+    const movie = db.prepare('SELECT hidden FROM movies WHERE id = ?').get(id);
+    if (!movie) return res.status(404).json({ error: 'Movie not found' });
+    const next = movie.hidden ? 0 : 1;
+    db.prepare('UPDATE movies SET hidden = ? WHERE id = ?').run(next, id);
+    res.json({ id, hidden: !!next });
+  } catch (err) {
+    console.error('Error toggling movie visibility:', err);
+    res.status(500).json({ error: 'Failed to update movie visibility' });
+  }
+});
+
 // Delete a movie (admin only)
 app.delete('/api/movies/:id', requireAdmin, (req, res) => {
   const id = req.params.id;
@@ -779,6 +848,19 @@ app.post('/api/movies/:id/reviews', (req, res) => {
     res.json({ success: true, reviewId: info.lastInsertRowid, count: agg.cnt || 0, average: agg.avgScore !== null ? Number(Number(agg.avgScore).toFixed(2)) : null, reviews: rows });
   } catch (err) {
     res.status(500).json({ error: 'failed to save review' });
+  }
+});
+
+// Delete a review (admin only)
+app.delete('/api/reviews/:id', requireAdmin, (req, res) => {
+  const id = req.params.id;
+  try {
+    const info = db.prepare('DELETE FROM reviews WHERE id = ?').run(id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Review not found' });
+    res.json({ success: true, message: 'Review deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting review:', err);
+    res.status(500).json({ error: 'Failed to delete review' });
   }
 });
 

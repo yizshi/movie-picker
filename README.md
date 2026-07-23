@@ -292,6 +292,7 @@ npm run start:firebase   # or :sqlite
 - `POST /api/admin/login` / `POST /api/admin/logout` / `GET /api/admin/me`
 - `DELETE /api/movies/:id` — delete
 - `PATCH /api/movies/:id/visibility` — hide/unhide
+- `POST /api/movies/hide-all` — bulk-hide every currently visible movie
 - `POST /api/meetings` / `PATCH /api/meetings/:id` / `DELETE /api/meetings/:id`
 - `POST /api/meetings/:id/watched` — record the watched movie
 - `DELETE /api/votes/:id` — remove a ballot

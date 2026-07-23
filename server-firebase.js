@@ -433,6 +433,28 @@ app.post('/api/movies', async (req, res) => {
   }
 });
 
+// Bulk-hide every currently-visible movie. Used by admin to reset the pool
+// between meetings without deleting suggestions.
+app.post('/api/movies/hide-all', requireAdmin, async (req, res) => {
+  try {
+    const snapshot = await db.collection('movies').select('hidden').get();
+    const targets = snapshot.docs.filter(d => !d.data().hidden);
+    if (targets.length === 0) return res.json({ hidden: 0 });
+
+    let hidden = 0;
+    for (const group of chunk(targets, 500)) {
+      const batch = db.batch();
+      for (const doc of group) batch.update(doc.ref, { hidden: true });
+      await batch.commit();
+      hidden += group.length;
+    }
+    res.json({ hidden });
+  } catch (error) {
+    console.error('Error hiding all movies:', error);
+    res.status(500).json({ error: 'Failed to hide all movies' });
+  }
+});
+
 app.patch('/api/movies/:id/visibility', requireAdmin, async (req, res) => {
   const id = req.params.id;
   try {
