@@ -103,10 +103,10 @@ jobs:
           EOF
 
       - name: Deploy to Firebase
+        # Auth via the service account JSON at GOOGLE_APPLICATION_CREDENTIALS.
+        # The old --token flow (firebase login:ci) is deprecated.
         run: |
-          firebase deploy \
-            --project ${{ secrets.FIREBASE_PROJECT_ID }} \
-            --token ${{ secrets.FIREBASE_TOKEN }}
+          firebase deploy --project ${{ secrets.FIREBASE_PROJECT_ID }} --non-interactive
 
       - name: Clean up functions/.env
         if: always()
