@@ -236,7 +236,7 @@ async function verifyPassword(inputPassword, storedHash, storedPlaintext) {
 // token map does not survive between requests — every navigation could
 // hit a different instance and force a re-login. Signing solves that.
 const TOKEN_SECRET = ADMIN_PASSWORD_HASH || ADMIN_PASSWORD_PLAINTEXT || 'unset-token-secret';
-const ADMIN_TOKEN_TTL_MS = 1000 * 60 * 60; // 1 hour
+const ADMIN_TOKEN_TTL_MS = 1000 * 60 * 60 * 8; // 8 hours
 
 function signAdminToken(ttlMs = ADMIN_TOKEN_TTL_MS) {
   const exp = Date.now() + ttlMs;
