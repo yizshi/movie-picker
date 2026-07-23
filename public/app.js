@@ -1,5 +1,6 @@
-// Cloud Functions URL since Firebase Hosting rewrites are broken
-const API_BASE = 'https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api';
+// Same-origin API. In production, firebase.json rewrites /api/** to the
+// deployed Cloud Function. Locally, server.js / server-firebase.js serve it.
+const API_BASE = '/api';
 
 
 async function fetchMovies() {

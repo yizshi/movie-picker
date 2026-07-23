@@ -268,8 +268,8 @@
       try {
         // Fetch meeting details and votes in parallel
         const [meetingResponse, votesResponse] = await Promise.all([
-          fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings/${meetingId}`),
-          fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/votes?meetingId=${meetingId}`)
+          fetch(`/api/meetings/${meetingId}`),
+          fetch(`/api/votes?meetingId=${meetingId}`)
         ]);
 
         if (!meetingResponse.ok) {
@@ -358,7 +358,7 @@
 
       try {
         // Fetch all movies
-        const response = await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/movies');
+        const response = await fetch('/api/movies');
         const allMovies = await response.json();
         
         // Filter to only allowed movies
@@ -399,7 +399,7 @@
       // Fetch all movies to get titles
       let allMovies = [];
       try {
-        const response = await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/movies');
+        const response = await fetch('/api/movies');
         allMovies = await response.json();
       } catch (error) {
         console.error('Error loading movies for results:', error);
@@ -661,7 +661,7 @@
         }
 
 
-        const response = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/votes/${voteId}`, {
+        const response = await fetch(`/api/votes/${voteId}`, {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',

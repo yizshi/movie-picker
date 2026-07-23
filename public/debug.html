@@ -99,7 +99,7 @@
         testMovie(firebaseMovie, 'firebase-sample', 'Firebase Format');
         
         // Fetch current API data
-        fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/movies')
+        fetch('/api/movies')
             .then(response => response.json())
             .then(movies => {
                 const container = document.getElementById('current-data');

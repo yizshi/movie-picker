@@ -96,17 +96,17 @@
     }
 
     async function fetchMeeting(id) {
-      const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings/${id}`); return await res.json();
+      const res = await fetch(`/api/meetings/${id}`); return await res.json();
     }
     async function fetchReviews(movieId) {
-      const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/movies/${movieId}/reviews`); return await res.json();
+      const res = await fetch(`/api/movies/${movieId}/reviews`); return await res.json();
     }
     async function postReview(movieId, body) {
-      const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/movies/${movieId}/reviews`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }); return await res.json();
+      const res = await fetch(`/api/movies/${movieId}/reviews`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }); return await res.json();
     }
     async function deleteReview(reviewId) {
       const token = localStorage.getItem('adminToken');
-      const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/reviews/${reviewId}`, { 
+      const res = await fetch(`/api/reviews/${reviewId}`, { 
         method: 'DELETE', 
         headers: {
           'Content-Type': 'application/json',
@@ -119,7 +119,7 @@
       const token = localStorage.getItem('adminToken');
       if (!token) return false;
       try {
-        const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/admin/me`, {
+        const res = await fetch(`/api/admin/me`, {
           headers: { 'X-Admin-Token': token }
         });
         const data = await res.json();
