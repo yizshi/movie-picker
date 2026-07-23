@@ -6,6 +6,7 @@
     <title>Meeting Manager - Admin</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </head>
 <body>
     <div class="container py-4">
@@ -37,6 +38,12 @@
                             <label for="meetingName" class="form-label">Meeting Name</label>
                             <input type="text" class="form-control" id="meetingName" required>
                         </div>
+                        <div class="mb-3">
+                            <label for="meetingNotes" class="form-label">Meeting Notes</label>
+                            <textarea class="form-control" id="meetingNotes" rows="3" 
+                                      placeholder="Add any instructions, themes, or context for this meeting..."></textarea>
+                            <div class="form-text">Optional notes that will be displayed to voters during the voting process.</div>
+                        </div>
                         <!-- Meeting date removed: we require votes for candidate days instead -->
                         <div class="mb-3">
                             <label class="form-label">Candidate Days</label>
@@ -46,8 +53,41 @@
                             </button>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Movie Options</label>
-                            <div id="movieOptions"></div>
+                            <label class="form-label">Movie Selection</label>
+                            
+                            <!-- Genre-based selection controls -->
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <h6 class="mb-0">Select by Genre</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row mb-2">
+                                        <div class="col-md-6">
+                                            <button type="button" class="btn btn-outline-success btn-sm me-2" onclick="selectAllMovies()">
+                                                Select All Movies
+                                            </button>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="deselectAllMovies()">
+                                                Deselect All
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div id="genreSelectors" class="row g-2">
+                                        <!-- Genre buttons will be populated here -->
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Individual movie selection -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0">Individual Movie Selection</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row" id="movieOptions">
+                                        <!-- Individual movie checkboxes will be populated here -->
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <button type="submit" class="btn btn-primary">Create Meeting</button>
                     </form>
@@ -78,7 +118,7 @@
         // Check admin status
         async function checkAdminStatus() {
             try {
-                const response = await fetch('/api/admin/me', {
+                const response = await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/admin/me', {
                     headers: {
                         'Authorization': `Bearer ${adminToken}`
                     }
@@ -95,11 +135,85 @@
             }
         }
 
+        // Set watched movie for a meeting (admin)
+        async function setWatchedMovie(meetingId, meetingName) {
+            // Create modal HTML for movie selection
+            const movieOptions = movies.map(movie => 
+                `<option value="${movie.id}">${movie.title}</option>`
+            ).join('');
+            
+            const modalHTML = `
+                <div class="modal fade" id="setWatchedMovieModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Set Watched Movie for: ${meetingName}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="text-muted">Select which movie was actually watched for this meeting:</p>
+                                <div class="mb-3">
+                                    <label for="watchedMovieSelect" class="form-label">Movie</label>
+                                    <select class="form-select" id="watchedMovieSelect">
+                                        <option value="">-- Clear watched movie --</option>
+                                        ${movieOptions}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-primary" onclick="confirmSetWatchedMovie('${meetingId}')">
+                                    Set Movie
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Remove existing modal if any
+            const existingModal = document.getElementById('setWatchedMovieModal');
+            if (existingModal) existingModal.remove();
+            
+            // Add modal to page and show it
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            const modal = new bootstrap.Modal(document.getElementById('setWatchedMovieModal'));
+            modal.show();
+        }
+
+        // Confirm and execute setting watched movie
+        async function confirmSetWatchedMovie(meetingId) {
+            const selectElement = document.getElementById('watchedMovieSelect');
+            const movieId = selectElement.value || null;
+            
+            try {
+                const response = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings/${meetingId}/watched`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${adminToken}`
+                    },
+                    body: JSON.stringify({ movieId })
+                });
+                
+                if (response.ok) {
+                    // Close modal and refresh meetings
+                    bootstrap.Modal.getInstance(document.getElementById('setWatchedMovieModal')).hide();
+                    await loadMeetings();
+                } else {
+                    const data = await response.json().catch(() => ({}));
+                    alert(data.error || 'Failed to set watched movie');
+                }
+            } catch (err) {
+                alert('Error setting watched movie');
+            }
+        }
+
         // Toggle voting status for a meeting (admin)
         async function toggleVoting(id, currentState) {
             if (!confirm(`Are you sure you want to ${currentState ? 'finish' : 'open'} voting for this meeting?`)) return;
             try {
-                const response = await fetch(`/api/meetings/${id}`, {
+                const response = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings/${id}`, {
                     method: 'PATCH',
                     headers: {
                         'Content-Type': 'application/json',
@@ -121,7 +235,7 @@
         async function login() {
             const password = document.getElementById('passwordInput').value;
             try {
-                const response = await fetch('/api/admin/login', {
+                const response = await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/admin/login', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -146,7 +260,7 @@
         // Logout function
         async function logout() {
             try {
-                await fetch('/api/admin/logout', {
+                await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/admin/logout', {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${adminToken}`
@@ -180,17 +294,31 @@
 
         async function loadMovies() {
             try {
-                const response = await fetch('/api/movies');
+                const response = await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/movies');
                 movies = await response.json();
                 updateMovieOptions();
             } catch (err) {
+                console.error('Error loading movies:', err);
             }
         }
 
         async function loadMeetings() {
             try {
-                const response = await fetch('/api/meetings');
-                meetings = await response.json();
+                const response = await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings');
+                const basicMeetings = await response.json();
+                
+                // Fetch detailed info for each meeting to get watched_movie data
+                meetings = await Promise.all(
+                    basicMeetings.map(async (meeting) => {
+                        try {
+                            const detailResponse = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings/${meeting.id}`);
+                            return detailResponse.ok ? await detailResponse.json() : meeting;
+                        } catch (err) {
+                            return meeting; // fallback to basic info if detail fetch fails
+                        }
+                    })
+                );
+                
                 updateMeetingsList();
             } catch (err) {
             }
@@ -198,14 +326,116 @@
 
         function updateMovieOptions() {
             const container = document.getElementById('movieOptions');
-            container.innerHTML = movies.map(movie => `
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" value="${movie.id}" id="movie${movie.id}" checked>
-                    <label class="form-check-label" for="movie${movie.id}">
-                        ${movie.title}
-                    </label>
-                </div>
-            `).join('');
+            
+            // Collect all unique genres
+            const allGenres = new Set();
+            movies.forEach(movie => {
+                if (movie.genres) {
+                    try {
+                        const genres = typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres;
+                        if (Array.isArray(genres)) {
+                            genres.forEach(genre => allGenres.add(genre));
+                        }
+                    } catch (e) {
+                        console.warn(`Error parsing genres for movie ${movie.title}:`, e);
+                    }
+                }
+            });
+            
+            // Update genre selectors
+            updateGenreSelectors(Array.from(allGenres).sort());
+            
+            // Create individual movie checkboxes
+            container.innerHTML = movies.map(movie => {
+                
+                // Get genres for this movie
+                let movieGenres = [];
+                try {
+                    movieGenres = movie.genres ? (typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres) : [];
+                } catch (e) {}
+                
+                const genresText = movieGenres.length > 0 ? ` (${movieGenres.join(', ')})` : '';
+                
+                return `
+                    <div class="col-md-6 mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input movie-checkbox" type="checkbox" value="${movie.id}" id="movie${movie.id}" 
+                                   data-genres="${movieGenres.join(',')}" checked>
+                            <label class="form-check-label" for="movie${movie.id}">
+                                <strong>${movie.title}</strong>${genresText}
+                            </label>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function updateGenreSelectors(genres) {
+            const container = document.getElementById('genreSelectors');
+            
+            // Count movies per genre
+            const genreCounts = {};
+            movies.forEach(movie => {
+                if (movie.genres) {
+                    try {
+                        const movieGenres = typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres;
+                        if (Array.isArray(movieGenres)) {
+                            movieGenres.forEach(genre => {
+                                genreCounts[genre] = (genreCounts[genre] || 0) + 1;
+                            });
+                        }
+                    } catch (e) {}
+                }
+            });
+            
+            container.innerHTML = genres.map(genre => {
+                const count = genreCounts[genre] || 0;
+                return `
+                    <div class="col-auto mb-1">
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="selectByGenre('${genre}')" 
+                                    title="Select all ${count} ${genre} movies">
+                                ✓ ${genre} (${count})
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="deselectByGenre('${genre}')"
+                                    title="Deselect all ${genre} movies">
+                                ✗
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Genre-based selection functions
+        function selectAllMovies() {
+            document.querySelectorAll('.movie-checkbox').forEach(checkbox => {
+                checkbox.checked = true;
+            });
+        }
+        
+        function deselectAllMovies() {
+            document.querySelectorAll('.movie-checkbox').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+        }
+        
+        function selectByGenre(genre) {
+            document.querySelectorAll('.movie-checkbox').forEach(checkbox => {
+                const movieGenres = checkbox.dataset.genres.split(',');
+                if (movieGenres.includes(genre)) {
+                    checkbox.checked = true;
+                }
+            });
+        }
+        
+        function deselectByGenre(genre) {
+            document.querySelectorAll('.movie-checkbox').forEach(checkbox => {
+                const movieGenres = checkbox.dataset.genres.split(',');
+                if (movieGenres.includes(genre)) {
+                    checkbox.checked = false;
+                }
+            });
         }
 
         function updateMeetingsList() {
@@ -223,8 +453,14 @@
                                 <h5 class="card-title">${meeting.name || 'Unnamed Meeting'}</h5>
                                 <p class="card-text">
                                     ${meeting.date ? `Date: ${meeting.date}<br>` : ''}
-                                    Status: ${meeting.voting_open ? 'Voting Open' : 'Voting Closed'}
+                                    Status: ${meeting.voting_open ? 'Voting Open' : 'Voting Closed'}<br>
+                                    Watched Movie: ${meeting.watched_movie ? `<strong>${meeting.watched_movie.title}</strong>` : '<span class="text-muted">None selected</span>'}
                                 </p>
+                                ${meeting.notes ? `
+                                    <p class="card-text">
+                                        <strong>Notes:</strong> ${meeting.notes}
+                                    </p>
+                                ` : ''}
                                 ${meeting.candidate_days && meeting.candidate_days.length > 0 ? `
                                     <p class="card-text">
                                         <small class="text-muted">
@@ -234,6 +470,12 @@
                                 ` : ''}
                             </div>
                                             <div class="btn-group" role="group">
+                                                <a href="/admin-meeting-details.html?id=${meeting.id}" class="btn btn-info btn-sm">
+                                                    View Details
+                                                </a>
+                                                <button onclick="setWatchedMovie('${meeting.id}', '${meeting.name || 'Unnamed Meeting'}')" class="btn btn-outline-primary btn-sm" title="Set which movie was watched">
+                                                    Set Watched Movie
+                                                </button>
                                                 <button onclick="toggleVoting('${meeting.id}', ${meeting.voting_open})" class="btn btn-sm ${meeting.voting_open ? 'btn-warning' : 'btn-success'}">
                                                     ${meeting.voting_open ? 'Finish Voting' : 'Open Voting'}
                                                 </button>
@@ -266,16 +508,21 @@
         async function createMeeting(event) {
             event.preventDefault();
             const name = document.getElementById('meetingName').value;
+            const notes = document.getElementById('meetingNotes').value.trim();
             // date removed from form: meeting date is not collected here
             const date = null;
             const candidateDays = Array.from(document.getElementsByClassName('candidate-day'))
                 .map(input => input.value)
                 .filter(Boolean);
-            const allowedMovieIds = Array.from(document.querySelectorAll('#movieOptions input:checked'))
-                .map(checkbox => parseInt(checkbox.value));
+            const checkedBoxes = document.querySelectorAll('#movieOptions input:checked');
+            const allowedMovieIds = Array.from(checkedBoxes)
+                .map(checkbox => {
+                    return checkbox.value;
+                });
+
 
             try {
-                const response = await fetch('/api/meetings', {
+                const response = await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -283,6 +530,7 @@
                     },
                     body: JSON.stringify({
                         name,
+                        notes: notes || null,
                         candidate_days: candidateDays,
                         allowed_movie_ids: allowedMovieIds,
                         voting_open: true
@@ -290,11 +538,14 @@
                 });
 
                 if (response.ok) {
+                    const responseData = await response.json();
                     document.getElementById('createMeetingForm').reset();
                     document.getElementById('candidateDays').innerHTML = '';
                     loadMeetings();
                 } else {
-                    alert('Failed to create meeting');
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('Failed to create meeting:', response.status, errorData);
+                    alert(`Failed to create meeting: ${errorData.error || response.statusText}`);
                 }
             } catch (err) {
                 alert('Error creating meeting');
@@ -308,7 +559,7 @@
             }
 
             try {
-                const response = await fetch(`/api/meetings/${id}`, {
+                const response = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings/${id}`, {
                     method: 'DELETE',
                     headers: {
                         'Authorization': `Bearer ${adminToken}`

@@ -18,8 +18,8 @@
   </div>
 
   <script>
-    async function fetchMeetings() { const r = await fetch('/api/meetings'); return await r.json(); }
-    async function fetchMeeting(id) { const r = await fetch(`/api/meetings/${id}`); return await r.json(); }
+    async function fetchMeetings() { const r = await fetch('https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings'); return await r.json(); }
+    async function fetchMeeting(id) { const r = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings/${id}`); return await r.json(); }
 
     async function render() {
       const container = document.getElementById('watched-meetings-list');

@@ -19,8 +19,11 @@ CREATE TABLE IF NOT EXISTS movies (
   metadata TEXT,
   notes TEXT,
   suggester TEXT,
+  imdb_id TEXT,
+  suggestions TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
 
 CREATE TABLE IF NOT EXISTS ballots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +86,14 @@ if (!movieColNames.includes('genres')) {
   db.prepare('ALTER TABLE movies ADD COLUMN genres TEXT').run();
 }
 
+if (!movieColNames.includes('imdb_id')) {
+  db.prepare('ALTER TABLE movies ADD COLUMN imdb_id TEXT').run();
+}
+
+if (!movieColNames.includes('suggestions')) {
+  db.prepare('ALTER TABLE movies ADD COLUMN suggestions TEXT').run();
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -93,7 +104,35 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Helpers
 function getMovies() {
   const stmt = db.prepare('SELECT * FROM movies ORDER BY created_at DESC');
-  return stmt.all();
+  const movies = stmt.all();
+  
+  // Handle backward compatibility and format suggestions
+  return movies.map(movie => {
+    let suggestions = [];
+    
+    if (movie.suggestions) {
+      try {
+        suggestions = JSON.parse(movie.suggestions);
+      } catch (e) {
+        suggestions = [];
+      }
+    } else if (movie.suggester || movie.notes) {
+      // Old format - convert to new format
+      suggestions = [{
+        suggester: movie.suggester || 'Anonymous',
+        notes: movie.notes || null,
+        created_at: movie.created_at
+      }];
+    }
+    
+    return {
+      ...movie,
+      suggestions: suggestions,
+      // Maintain backward compatibility for existing frontend code
+      suggester: suggestions.length > 0 ? suggestions[0].suggester : null,
+      notes: suggestions.length > 0 ? suggestions[0].notes : null
+    };
+  });
 }
 
 const http = require('http');
@@ -221,6 +260,50 @@ app.post('/api/movies', async (req, res) => {
   }
 
   try {
+    const imdbId = imdbMatch[1];
+    
+    // Check if a movie with this IMDB ID already exists
+    const existingMovie = db.prepare('SELECT * FROM movies WHERE imdb_id = ?').get(imdbId);
+    
+    if (existingMovie) {
+      // Movie exists, append new suggestion
+      let suggestions = [];
+      
+      // Parse existing suggestions or create from old format
+      if (existingMovie.suggestions) {
+        try {
+          suggestions = JSON.parse(existingMovie.suggestions);
+        } catch (e) {
+          suggestions = [];
+        }
+      }
+      
+      // For backward compatibility, convert old format if needed
+      if (existingMovie.suggester && !suggestions.some(s => s.suggester === existingMovie.suggester)) {
+        suggestions.unshift({
+          suggester: existingMovie.suggester,
+          notes: existingMovie.notes,
+          created_at: existingMovie.created_at || new Date().toISOString()
+        });
+      }
+
+      // Add new suggestion
+      suggestions.push({
+        suggester: suggester || 'Anonymous',
+        notes: notes || null,
+        created_at: new Date().toISOString()
+      });
+
+      // Update the existing movie
+      const updateStmt = db.prepare('UPDATE movies SET suggestions = ?, suggester = NULL, notes = NULL WHERE id = ?');
+      updateStmt.run(JSON.stringify(suggestions), existingMovie.id);
+
+      // Return updated movie
+      const updatedMovie = db.prepare('SELECT * FROM movies WHERE id = ?').get(existingMovie.id);
+      return res.json(updatedMovie);
+    }
+
+    // Movie doesn't exist, create new one
     let finalPosterUrl = poster;
     let finalGenres = null;
     let finalMetadata = null;
@@ -241,11 +324,19 @@ app.post('/api/movies', async (req, res) => {
       if (movieData.metadata) finalMetadata = movieData.metadata;
     }
 
-    const stmt = db.prepare('INSERT INTO movies (title, poster, genres, metadata, notes, suggester) VALUES (?, ?, ?, ?, ?, ?)');
-    const info = stmt.run(title, finalPosterUrl || null, finalGenres || null, finalMetadata || null, notes || null, suggester || null);
+    // Create new movie with suggestions array
+    const suggestions = [{
+      suggester: suggester || 'Anonymous',
+      notes: notes || null,
+      created_at: new Date().toISOString()
+    }];
+
+    const stmt = db.prepare('INSERT INTO movies (title, poster, genres, metadata, imdb_id, suggestions) VALUES (?, ?, ?, ?, ?, ?)');
+    const info = stmt.run(title, finalPosterUrl || null, finalGenres || null, finalMetadata || null, imdbId, JSON.stringify(suggestions));
     const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(info.lastInsertRowid);
     res.json(movie);
   } catch (err) {
+    console.error('Error creating/updating movie:', err);
     res.status(500).json({ error: 'Failed to create movie' });
   }
 });
@@ -794,8 +885,7 @@ app.get('*', (req, res) => {
 // Only start server if not in test mode
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+    });
 }
 
 // Export app for testing

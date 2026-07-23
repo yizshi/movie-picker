@@ -22,7 +22,6 @@ try {
   }
 } catch (error) {
   console.error('Error loading Firebase service account:', error.message);
-  console.log('Please set FIREBASE_SERVICE_ACCOUNT_KEY or GOOGLE_APPLICATION_CREDENTIALS environment variable');
   process.exit(1);
 }
 
@@ -46,36 +45,63 @@ app.use(express.static(path.join(__dirname, 'public')));
 async function getMovies() {
   try {
     // Remove orderBy to avoid index requirement issues, sort in memory instead
-    const snapshot = await db.collection('movies').get();
+    // Exclude poster_cached_data (large base64 blob) — not needed for the list
+    const snapshot = await db.collection('movies').select(
+      'title', 'poster', 'genres', 'metadata', 'imdb_id', 'hidden',
+      'suggestions', 'suggester', 'notes', 'created_at'
+    ).get();
     const movies = snapshot.docs.map(doc => {
       const data = doc.data();
       
-      // Convert Firestore Timestamp to JavaScript Date string
+      // Optimized timestamp conversion
       let created_at = null;
       if (data.created_at) {
-        if (data.created_at._seconds) {
-          // Firestore Timestamp format
-          created_at = new Date(data.created_at._seconds * 1000).toISOString();
-        } else if (data.created_at.toDate) {
-          // Firestore Timestamp object with toDate method
-          created_at = data.created_at.toDate().toISOString();
-        } else if (typeof data.created_at === 'string') {
-          // Already a string
-          created_at = data.created_at;
+        try {
+          created_at = data.created_at.toDate ? 
+            data.created_at.toDate().toISOString() : 
+            (typeof data.created_at === 'string' ? data.created_at : new Date(data.created_at).toISOString());
+        } catch (e) {
+          created_at = new Date().toISOString(); // fallback
         }
       }
       
-      // Use cached poster URL if available, otherwise use original
-      let posterUrl = data.poster;
-      if (data.poster_cached_data) {
-        posterUrl = `/api/posters/${doc.id}`;
+      // Use TMDB poster URL directly (no caching overhead)
+      const posterUrl = data.poster;
+
+      // Handle backward compatibility and format suggestions
+      let suggestions = [];
+      if (data.suggestions && Array.isArray(data.suggestions)) {
+        // Optimized timestamp conversion for suggestions
+        suggestions = data.suggestions.map(suggestion => ({
+          ...suggestion,
+          created_at: suggestion.created_at ? 
+            (suggestion.created_at.toDate ? 
+              suggestion.created_at.toDate().toISOString() : 
+              (typeof suggestion.created_at === 'string' ? suggestion.created_at : new Date(suggestion.created_at).toISOString())
+            ) : null
+        }));
+      } else if (data.suggester || data.notes) {
+        // Old format - convert to new format
+        suggestions = [{
+          suggester: data.suggester || 'Anonymous',
+          notes: data.notes || null,
+          created_at: created_at
+        }];
       }
       
       return {
         id: doc.id,
-        ...data,
+        title: data.title,
+        poster: posterUrl,
+        genres: data.genres,
+        metadata: data.metadata,
+        imdb_id: data.imdb_id,
+        hidden: data.hidden || false,
+        suggestions: suggestions,
         created_at,
-        poster: posterUrl
+        // Maintain backward compatibility for existing frontend code
+        suggester: suggestions.length > 0 ? suggestions[0].suggester : null,
+        notes: suggestions.length > 0 ? suggestions[0].notes : null
       };
     });
     
@@ -274,7 +300,11 @@ app.get('/api/admin/me', (req, res) => {
 app.get('/api/movies', async (req, res) => {
   try {
     const movies = await getMovies();
-    res.json(movies);
+    const token = (req.get('Authorization') || '').replace(/^Bearer\s+/, '') || req.get('X-Admin-Token');
+    const isAdmin = token && adminTokens.has(token) && adminTokens.get(token) > Date.now();
+    const includeHidden = isAdmin && req.query.include_hidden === 'true';
+    const filtered = includeHidden ? movies : movies.filter(m => !m.hidden);
+    res.json(filtered);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch movies' });
   }
@@ -290,6 +320,58 @@ app.post('/api/movies', async (req, res) => {
   }
 
   try {
+    const imdbId = imdbMatch[1];
+    
+    // Check if a movie with this IMDB ID already exists
+    const existingMoviesSnapshot = await db.collection('movies')
+      .where('imdb_id', '==', imdbId)
+      .get();
+
+    if (!existingMoviesSnapshot.empty) {
+      // Movie exists, append new suggestion
+      const existingDoc = existingMoviesSnapshot.docs[0];
+      const existingData = existingDoc.data();
+      
+      // Create new suggestion object
+      const newSuggestion = {
+        suggester: suggester || 'Anonymous',
+        notes: notes || null,
+        created_at: new Date()
+      };
+
+      // Get existing suggestions or initialize array
+      const existingSuggestions = existingData.suggestions || [];
+      
+      // For backward compatibility, if old format exists, convert it
+      if (existingData.suggester && !existingSuggestions.some(s => s.suggester === existingData.suggester)) {
+        existingSuggestions.unshift({
+          suggester: existingData.suggester,
+          notes: existingData.notes,
+          created_at: existingData.created_at || new Date()
+        });
+      }
+
+      // Add new suggestion
+      existingSuggestions.push(newSuggestion);
+
+      // Update the existing document (also unhide if it was hidden)
+      await existingDoc.ref.update({
+        suggestions: existingSuggestions,
+        hidden: false,
+        // Remove old fields if they exist (for migration)
+        suggester: admin.firestore.FieldValue.delete(),
+        notes: admin.firestore.FieldValue.delete()
+      });
+
+      // Return updated movie
+      const updatedMovie = await existingDoc.ref.get();
+      return res.json({
+        id: updatedMovie.id,
+        ...updatedMovie.data()
+      });
+    }
+
+    // Movie doesn't exist, create new one
     let finalPosterUrl = poster;
     let finalGenres = null;
     let finalMetadata = null;
@@ -313,8 +395,12 @@ app.post('/api/movies', async (req, res) => {
       poster: finalPosterUrl || null,
       genres: finalGenres || null,
       metadata: finalMetadata || null,
-      notes: notes || null,
-      suggester: suggester || null,
+      imdb_id: imdbId,
+      suggestions: [{
+        suggester: suggester || 'Anonymous',
+        notes: notes || null,
+        created_at: new Date()
+      }],
       created_at: admin.firestore.FieldValue.serverTimestamp()
     };
 
@@ -326,7 +412,25 @@ app.post('/api/movies', async (req, res) => {
       ...movie.data()
     });
   } catch (err) {
+    console.error('Error creating/updating movie:', err);
     res.status(500).json({ error: 'Failed to create movie' });
+  }
+});
+
+app.patch('/api/movies/:id/visibility', requireAdmin, async (req, res) => {
+  const id = req.params.id;
+  try {
+    const movieRef = db.collection('movies').doc(id);
+    const movieDoc = await movieRef.get();
+    if (!movieDoc.exists) {
+      return res.status(404).json({ error: 'Movie not found' });
+    }
+    const currentHidden = movieDoc.data().hidden || false;
+    await movieRef.update({ hidden: !currentHidden });
+    res.json({ id, hidden: !currentHidden });
+  } catch (error) {
+    console.error('Error toggling movie visibility:', error);
+    res.status(500).json({ error: 'Failed to update movie visibility' });
   }
 });
 
@@ -726,7 +830,20 @@ app.get('/api/results', async (req, res) => {
   const meetingId = req.query.meetingId;
   
   try {
-    const movies = await getMovies();
+    let movies = await getMovies();
+    
+    // If meetingId is specified, filter movies by meeting's allowed_movie_ids
+    if (meetingId) {
+      const meetingDoc = await db.collection('meetings').doc(meetingId).get();
+      if (meetingDoc.exists) {
+        const meeting = meetingDoc.data();
+        if (meeting.allowed_movie_ids && Array.isArray(meeting.allowed_movie_ids)) {
+          // Filter movies to only those allowed for this meeting
+          movies = movies.filter(movie => meeting.allowed_movie_ids.includes(movie.id));
+        }
+      }
+    }
+    
     const movieScores = {};
     const movieBallots = {};
     const movieVoteCounts = {};
@@ -848,6 +965,47 @@ app.post('/api/movies/:id/reviews', async (req, res) => {
   }
 });
 
+// Delete review endpoint (admin only)
+app.delete('/api/reviews/:id', requireAdmin, async (req, res) => {
+  const reviewId = req.params.id;
+  
+  try {
+    const reviewRef = db.collection('reviews').doc(reviewId);
+    const reviewDoc = await reviewRef.get();
+    
+    if (!reviewDoc.exists) {
+      return res.status(404).json({ error: 'Review not found' });
+    }
+    
+    const reviewData = reviewDoc.data();
+    const movieId = reviewData.movie_id;
+    
+    // Delete the review
+    await reviewRef.delete();
+    
+    // Fetch updated reviews and stats for this movie
+    const reviewsSnapshot = await db.collection('reviews')
+      .where('movie_id', '==', movieId)
+      .orderBy('created_at', 'desc')
+      .get();
+    
+    const reviews = reviewsSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    
+    const count = reviews.length;
+    const average = count > 0 ? 
+      Number((reviews.reduce((sum, r) => sum + r.score, 0) / count).toFixed(2)) : 
+      null;
+    
+    res.json({ success: true, deleted: true, count, average, reviews });
+  } catch (error) {
+    console.error('Error deleting review:', error);
+    res.status(500).json({ error: 'Failed to delete review' });
+  }
+});
+
 // Serve cached poster images
 app.get('/api/posters/:movieId', async (req, res) => {
   const movieId = req.params.movieId;
@@ -880,7 +1038,6 @@ app.get('/api/posters/:movieId', async (req, res) => {
     if (isExpired && movie.poster_original_url) {
       // Cache expired - redirect to original URL for now
       // Note: In production, you might want to trigger a background refresh here
-      console.log(`Cache expired for movie ${movieId}, redirecting to original URL`);
       return res.redirect(movie.poster_original_url);
     }
     
@@ -910,5 +1067,4 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Firebase server running on port ${PORT}`);
 });

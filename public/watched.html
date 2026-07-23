@@ -63,23 +63,130 @@
       return `<div class="genre-tags">${tags}</div>`;
     }
 
+    // Helper function to render suggester information
+    function renderSuggester(movie) {
+      // Handle both old and new data formats
+      if (movie.suggestions && Array.isArray(movie.suggestions)) {
+        if (movie.suggestions.length === 1) {
+          return `Suggested by: ${movie.suggestions[0].suggester || 'Anonymous'}`;
+        } else if (movie.suggestions.length > 1) {
+          const names = movie.suggestions.map(s => s.suggester || 'Anonymous').join(', ');
+          return `Suggested by: ${names}`;
+        }
+      }
+      // Fallback to old format
+      return `Suggested by: ${movie.suggester || 'Anonymous'}`;
+    }
+
+    // Helper function to format Firestore timestamps
+    function formatTimestamp(timestamp) {
+      if (!timestamp) return 'Unknown date';
+      
+      // Handle Firestore Timestamp object
+      if (timestamp._seconds) {
+        return new Date(timestamp._seconds * 1000).toLocaleString();
+      }
+      
+      // Handle regular Date objects or ISO strings
+      try {
+        return new Date(timestamp).toLocaleString();
+      } catch (e) {
+        return 'Invalid date';
+      }
+    }
+
     async function fetchMeeting(id) {
-      const res = await fetch(`/api/meetings/${id}`); return await res.json();
+      const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/meetings/${id}`); return await res.json();
     }
     async function fetchReviews(movieId) {
-      const res = await fetch(`/api/movies/${movieId}/reviews`); return await res.json();
+      const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/movies/${movieId}/reviews`); return await res.json();
     }
     async function postReview(movieId, body) {
-      const res = await fetch(`/api/movies/${movieId}/reviews`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }); return await res.json();
+      const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/movies/${movieId}/reviews`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }); return await res.json();
+    }
+    async function deleteReview(reviewId) {
+      const token = localStorage.getItem('adminToken');
+      const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/reviews/${reviewId}`, { 
+        method: 'DELETE', 
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': token
+        }
+      }); 
+      return await res.json();
+    }
+    async function checkAdminStatus() {
+      const token = localStorage.getItem('adminToken');
+      if (!token) return false;
+      try {
+        const res = await fetch(`https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api/admin/me`, {
+          headers: { 'X-Admin-Token': token }
+        });
+        const data = await res.json();
+        return data.admin === true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    async function renderReviews(movieId, isAdmin) {
+      const data = await fetchReviews(movieId);
+      document.getElementById('average-score').textContent = data.average !== null ? `Average: ${data.average} (${data.count} votes)` : 'No scores yet';
+      const list = document.getElementById('reviews-list'); 
+      list.innerHTML = '';
+      
+      if (data.reviews && data.reviews.length) {
+        for (const r of data.reviews) {
+          const el = document.createElement('div'); 
+          el.className = 'card mb-2';
+          const deleteButton = isAdmin ? 
+            `<button class="btn btn-sm btn-outline-danger ms-2" onclick="handleDeleteReview('${r.id}', '${movieId}')">Delete</button>` : '';
+          el.innerHTML = `
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start">
+                <div class="flex-grow-1">
+                  <h6 class="card-subtitle mb-1 text-muted">${r.username || 'Anonymous'} — ${formatTimestamp(r.created_at)}</h6>
+                  <div class="fw-bold">Score: ${r.score}</div>
+                  <p class="card-text">${r.comment || ''}</p>
+                </div>
+                ${deleteButton}
+              </div>
+            </div>
+          `;
+          list.appendChild(el);
+        }
+      } else {
+        list.innerHTML = '<div class="text-muted">No comments yet.</div>';
+      }
     }
 
     async function render() {
       const area = document.getElementById('watched-area');
       if (!meetingId) { area.innerHTML = '<div class="text-muted">No meeting specified.</div>'; return; }
       try {
+        // Check admin status
+        const isAdmin = await checkAdminStatus();
+        
         const meeting = await fetchMeeting(meetingId);
         if (!meeting) { area.innerHTML = '<div class="text-muted">Meeting not found.</div>'; return; }
-        if (!meeting.watched_movie) { area.innerHTML = '<div class="text-muted">No watched movie recorded for this meeting.</div>'; return; }
+        if (!meeting.watched_movie) { 
+          const meetingName = meeting.name || meeting.date || `Meeting ${meetingId}`;
+          area.innerHTML = `
+            <div class="alert alert-info">
+              <h5>No movie selected for ${meetingName}</h5>
+              <p>This meeting finished voting but no movie was automatically selected. This happens when:</p>
+              <ul class="mb-3">
+                <li>No votes were cast during the voting period</li>
+                <li>All movies received equal scores</li>
+              </ul>
+              <p class="mb-0">
+                <a href="/results.html?meetingId=${meetingId}" class="btn btn-primary">View voting results</a>
+                <a href="/admin-meetings.html" class="btn btn-outline-secondary ms-2">Manage meetings (Admin)</a>
+              </p>
+            </div>
+          `; 
+          return; 
+        }
         const mv = meeting.watched_movie;
         const genresHtml = renderGenres(mv.genres);
         const card = `
@@ -91,7 +198,7 @@
               <h3 class="card-title">${mv.title}</h3>
               ${genresHtml}
               <p class="card-text">${mv.notes || ''}</p>
-              <div class="text-muted">Suggested by: ${mv.suggester || 'Anonymous'}</div>
+              <div class="text-muted">${renderSuggester(mv)}</div>
             </div>
           </div>
         `;
@@ -102,18 +209,7 @@
         if (goto) goto.href = `/watched.html?meetingId=${meetingId}`;
 
         // load reviews
-        const data = await fetchReviews(mv.id);
-        document.getElementById('average-score').textContent = data.average !== null ? `Average: ${data.average} (${data.count} votes)` : 'No scores yet';
-        const list = document.getElementById('reviews-list'); list.innerHTML = '';
-        if (data.reviews && data.reviews.length) {
-          for (const r of data.reviews) {
-            const el = document.createElement('div'); el.className = 'card mb-2';
-            el.innerHTML = `<div class=\"card-body\"><h6 class=\"card-subtitle mb-1 text-muted\">${r.username || 'Anonymous'} — ${new Date(r.created_at).toLocaleString()}</h6><div class=\"fw-bold\">Score: ${r.score}</div><p class=\"card-text\">${r.comment || ''}</p></div>`;
-            list.appendChild(el);
-          }
-        } else {
-          list.innerHTML = '<div class="text-muted">No comments yet.</div>';
-        }
+        await renderReviews(mv.id, isAdmin);
 
         // form submit
         const form = document.getElementById('review-form');
@@ -131,14 +227,7 @@
             document.getElementById('review-name').value = '';
             document.getElementById('review-score').value = '';
             document.getElementById('review-comment').value = '';
-            document.getElementById('average-score').textContent = res.average !== null ? `Average: ${res.average} (${res.count} votes)` : 'No scores yet';
-            const list = document.getElementById('reviews-list');
-            list.innerHTML = '';
-            for (const r of res.reviews) {
-              const el = document.createElement('div'); el.className = 'card mb-2';
-              el.innerHTML = `<div class=\"card-body\"><h6 class=\"card-subtitle mb-1 text-muted\">${r.username || 'Anonymous'} — ${new Date(r.created_at).toLocaleString()}</h6><div class=\"fw-bold\">Score: ${r.score}</div><p class=\"card-text\">${r.comment || ''}</p></div>`;
-              list.appendChild(el);
-            }
+            await renderReviews(mv.id, isAdmin);
             msg.textContent = 'Thanks for your review';
           } catch (err) {
             msg.textContent = err.message || 'Error submitting review';
@@ -147,6 +236,25 @@
 
       } catch (err) {
         area.innerHTML = '<div class="text-muted">Error loading watched movie.</div>';
+      }
+    }
+
+    async function handleDeleteReview(reviewId, movieId) {
+      if (!confirm('Are you sure you want to delete this review?')) {
+        return;
+      }
+      
+      try {
+        const res = await deleteReview(reviewId);
+        if (!res || res.error) {
+          throw new Error(res?.error || 'Failed to delete review');
+        }
+        
+        // Re-render reviews with updated data from the server
+        const isAdmin = await checkAdminStatus();
+        await renderReviews(movieId, isAdmin);
+      } catch (error) {
+        alert('Error deleting review: ' + error.message);
       }
     }
 

@@ -126,7 +126,15 @@
       col.className = 'col-lg-6 col-xl-4';
       col.dataset.movieId = movie.id;
       col.dataset.title = movie.title.toLowerCase();
-      col.dataset.suggester = (movie.suggester || '').toLowerCase();
+      
+      // Include all suggesters in the dataset for search
+      let allSuggesterNames = '';
+      if (movie.suggestions && Array.isArray(movie.suggestions)) {
+        allSuggesterNames = movie.suggestions.map(s => s.suggester || '').join(' ').toLowerCase();
+      } else if (movie.suggester) {
+        allSuggesterNames = movie.suggester.toLowerCase();
+      }
+      col.dataset.suggester = allSuggesterNames;
       
       // Extract genres for filtering
       let movieGenres = [];
@@ -229,25 +237,85 @@
         cardBody.appendChild(titleContainer);
       }
       
-      // Suggester
-      const suggester = document.createElement('div');
-      suggester.className = 'text-muted mb-2';
-      suggester.innerHTML = `<small><strong>Suggested by:</strong> ${movie.suggester || 'Anonymous'}</small>`;
-      cardBody.appendChild(suggester);
-      
-      // Notes (always visible now)
-      if (movie.notes) {
-        const notesLabel = document.createElement('strong');
-        notesLabel.className = 'd-block mt-2 text-primary';
-        notesLabel.textContent = 'Notes:';
+      // Suggestions (multiple suggesters and notes)
+      if (movie.suggestions && movie.suggestions.length > 0) {
+        const suggestionsContainer = document.createElement('div');
+        suggestionsContainer.className = 'suggestions-container mb-2';
         
-        const notes = document.createElement('p');
-        notes.className = 'card-text small mb-2';
-        notes.textContent = movie.notes;
-        notes.style.fontStyle = 'italic';
+        if (movie.suggestions.length === 1) {
+          // Single suggestion - display normally
+          const suggestion = movie.suggestions[0];
+          const suggester = document.createElement('div');
+          suggester.className = 'text-muted mb-2';
+          suggester.innerHTML = `<small><strong>Suggested by:</strong> ${suggestion.suggester || 'Anonymous'}</small>`;
+          suggestionsContainer.appendChild(suggester);
+          
+          if (suggestion.notes) {
+            const notesLabel = document.createElement('strong');
+            notesLabel.className = 'd-block mt-2 text-primary';
+            notesLabel.textContent = 'Notes:';
+            
+            const notes = document.createElement('p');
+            notes.className = 'card-text small mb-2';
+            notes.textContent = suggestion.notes;
+            notes.style.fontStyle = 'italic';
+            
+            suggestionsContainer.appendChild(notesLabel);
+            suggestionsContainer.appendChild(notes);
+          }
+        } else {
+          // Multiple suggestions - display as list
+          const suggestionTitle = document.createElement('strong');
+          suggestionTitle.className = 'd-block mt-2 text-primary';
+          suggestionTitle.textContent = `Suggested by ${movie.suggestions.length} people:`;
+          suggestionsContainer.appendChild(suggestionTitle);
+          
+          movie.suggestions.forEach((suggestion, index) => {
+            const suggestionDiv = document.createElement('div');
+            suggestionDiv.className = 'suggestion-item mb-2 p-2 border-start border-2 border-light';
+            
+            const suggesterName = document.createElement('small');
+            suggesterName.className = 'text-muted d-block';
+            suggesterName.innerHTML = `<strong>${suggestion.suggester || 'Anonymous'}</strong>`;
+            if (suggestion.created_at) {
+              const date = new Date(suggestion.created_at);
+              suggesterName.innerHTML += ` <span class="text-muted">(${date.toLocaleDateString()})</span>`;
+            }
+            suggestionDiv.appendChild(suggesterName);
+            
+            if (suggestion.notes) {
+              const notes = document.createElement('p');
+              notes.className = 'card-text small mb-0 mt-1';
+              notes.textContent = suggestion.notes;
+              notes.style.fontStyle = 'italic';
+              suggestionDiv.appendChild(notes);
+            }
+            
+            suggestionsContainer.appendChild(suggestionDiv);
+          });
+        }
         
-        cardBody.appendChild(notesLabel);
-        cardBody.appendChild(notes);
+        cardBody.appendChild(suggestionsContainer);
+      } else {
+        // Fallback for old data format
+        const suggester = document.createElement('div');
+        suggester.className = 'text-muted mb-2';
+        suggester.innerHTML = `<small><strong>Suggested by:</strong> ${movie.suggester || 'Anonymous'}</small>`;
+        cardBody.appendChild(suggester);
+        
+        if (movie.notes) {
+          const notesLabel = document.createElement('strong');
+          notesLabel.className = 'd-block mt-2 text-primary';
+          notesLabel.textContent = 'Notes:';
+          
+          const notes = document.createElement('p');
+          notes.className = 'card-text small mb-2';
+          notes.textContent = movie.notes;
+          notes.style.fontStyle = 'italic';
+          
+          cardBody.appendChild(notesLabel);
+          cardBody.appendChild(notes);
+        }
       }
       
       // Collapsible additional details

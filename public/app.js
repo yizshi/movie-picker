@@ -1,11 +1,14 @@
+// Cloud Functions URL since Firebase Hosting rewrites are broken
+const API_BASE = 'https://us-central1-distributed-denial-of-screen.cloudfunctions.net/api';
+
+
 async function fetchMovies() {
   try {
-    const res = await fetch('/api/movies');
+    const res = await fetch(`${API_BASE}/movies`);
     if (!res.ok) {
       throw new Error(`HTTP error! status: ${res.status}`);
     }
     const data = await res.json();
-    console.log('Fetched movies:', data.length, 'movies');
     return data;
   } catch (error) {
     console.error('Error fetching movies:', error);
@@ -14,12 +17,72 @@ async function fetchMovies() {
 }
 
 async function fetchResults(meetingId) {
-  const url = meetingId ? `/api/results?meetingId=${encodeURIComponent(meetingId)}` : '/api/results';
-  const res = await fetch(url);
-  return await res.json();
+  const url = meetingId ? `${API_BASE}/results?meetingId=${encodeURIComponent(meetingId)}` : `${API_BASE}/results`;
+  
+  try {
+    const res = await fetch(url);
+    
+    if (!res.ok) {
+      console.error('Results fetch failed:', res.status, res.statusText);
+      return [];
+    }
+    
+    const data = await res.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching results:', error);
+    return [];
+  }
 }
 
 function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
+
+// Helper function to render multiple suggestions
+function renderSuggestions(movie) {
+  if (!movie) return { suggesterText: '', notesHtml: '' };
+  
+  // Handle both old format (single suggester) and new format (multiple suggestions)
+  let suggestions = [];
+  
+  if (movie.suggestions && Array.isArray(movie.suggestions)) {
+    // New format: multiple suggestions
+    suggestions = movie.suggestions;
+  } else if (movie.suggester || movie.notes) {
+    // Old format: single suggester
+    suggestions = [{
+      suggester: movie.suggester || 'Anonymous',
+      notes: movie.notes || '',
+      created_at: null
+    }];
+  }
+  
+  if (suggestions.length === 0) {
+    return { suggesterText: 'Anonymous', notesHtml: '' };
+  }
+  
+  if (suggestions.length === 1) {
+    // Single suggestion
+    const s = suggestions[0];
+    return {
+      suggesterText: s.suggester || 'Anonymous',
+      notesHtml: s.notes ? `<p class="card-text">${s.notes}</p>` : ''
+    };
+  } else {
+    // Multiple suggestions
+    const suggesterNames = suggestions.map(s => s.suggester || 'Anonymous').join(', ');
+    const notesHtml = suggestions.map(s => {
+      if (!s.notes) return '';
+      return `<div class="mb-2">
+        <strong>${s.suggester || 'Anonymous'}:</strong> ${s.notes}
+      </div>`;
+    }).filter(Boolean).join('');
+    
+    return {
+      suggesterText: `${suggestions.length} people: ${suggesterNames}`,
+      notesHtml: notesHtml ? `<div class="mb-2">${notesHtml}</div>` : ''
+    };
+  }
+}
 
 // Helper function to render genres as tags
 function renderGenres(genres) {
@@ -44,18 +107,49 @@ function setAdminToken(t) { try { if (t) localStorage.setItem('adminToken', t); 
 async function checkIsAdmin() {
   const token = getAdminToken();
   if (!token) return false;
-  const res = await fetch('/api/admin/me', { headers: { 'X-Admin-Token': token } });
+  const res = await fetch(`${API_BASE}/admin/me`, { headers: { 'X-Admin-Token': token } });
   try { const body = await res.json(); return !!body.admin; } catch(e){ return false; }
 }
 
-// Store original movies data for filtering
+// Store original movies data for filtering and caching
 let originalMoviesData = [];
 let currentFilteredMovies = [];
+let moviesCache = null;
+let cacheTimestamp = 0;
+const CACHE_DURATION = 30000; // 30 seconds
 
-async function renderMovies() {
+// Enhanced fetchMovies with caching
+async function fetchMoviesWithCache() {
+  const now = Date.now();
+  
+  // Return cached data if still fresh
+  if (moviesCache && (now - cacheTimestamp) < CACHE_DURATION) {
+    return moviesCache;
+  }
+  
   const movies = await fetchMovies();
+  
+  // Cache the result
+  moviesCache = movies;
+  cacheTimestamp = now;
+  
+  return movies;
+}
+
+async function renderMovies(allowedMovieIds = null) {
+  const startTime = performance.now();
+  let movies = await fetchMoviesWithCache();
+  
+  // Filter movies based on allowed IDs if provided (for voting pages with meeting restrictions)
+  if (allowedMovieIds && Array.isArray(allowedMovieIds)) {
+    const validIds = allowedMovieIds.filter(id => id !== null && id !== undefined);
+    const allowedSet = new Set(validIds.map(String));
+    movies = movies.filter(m => allowedSet.has(String(m.id)));
+  }
+  
   originalMoviesData = movies;
   currentFilteredMovies = movies;
+  
   
   const container = document.getElementById('movies-list');
   if (!container) return; // page doesn't show a movies list
@@ -122,7 +216,15 @@ function createDetailedMovieCard(movie) {
   const col = el('div', 'col-lg-6 col-xl-4');
   col.dataset.movieId = movie.id;
   col.dataset.title = movie.title.toLowerCase();
-  col.dataset.suggester = (movie.suggester || '').toLowerCase();
+  
+  // Include all suggesters in the dataset for search
+  let allSuggesterNames = '';
+  if (movie.suggestions && Array.isArray(movie.suggestions)) {
+    allSuggesterNames = movie.suggestions.map(s => s.suggester || '').join(' ').toLowerCase();
+  } else if (movie.suggester) {
+    allSuggesterNames = movie.suggester.toLowerCase();
+  }
+  col.dataset.suggester = allSuggesterNames;
   
   // Extract genres for filtering
   let movieGenres = [];
@@ -134,13 +236,27 @@ function createDetailedMovieCard(movie) {
   const card = el('div', 'card h-100');
   card.style.cursor = 'pointer';
   
-  // Movie poster
+  // Movie poster with lazy loading and error handling
   const imgContainer = el('div', 'position-relative');
   const img = el('img', 'card-img-top');
-  img.src = movie.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
+  
+  // Set up lazy loading
+  img.loading = 'lazy';
   img.alt = movie.title;
   img.style.height = '200px';
   img.style.objectFit = 'cover';
+  img.style.backgroundColor = '#f8f9fa'; // placeholder background
+  
+  // Handle poster loading with fallback
+  const posterUrl = movie.poster || 'https://via.placeholder.com/300x450?text=No+Poster';
+  img.src = posterUrl;
+  
+  // Add error handling for broken images
+  img.onerror = function() {
+    this.src = 'https://via.placeholder.com/300x450?text=No+Poster';
+    this.onerror = null; // prevent infinite loop
+  };
+  
   imgContainer.appendChild(img);
   
   // Expand/collapse indicator
@@ -200,20 +316,70 @@ function createDetailedMovieCard(movie) {
     cardBody.appendChild(titleContainer);
   }
   
-  // Suggester
-  const suggester = el('small', 'text-muted mb-2');
-  suggester.textContent = movie.suggester ? `Suggested by ${movie.suggester}` : 'Anonymous';
-  cardBody.appendChild(suggester);
-  
-  // Notes (always visible now)
-  if (movie.notes) {
-    const notesLabel = el('strong', 'd-block mt-2 text-primary'); 
-    notesLabel.textContent = 'Notes:';
-    const notes = el('p', 'card-text small mb-2');
-    notes.textContent = movie.notes;
-    notes.style.fontStyle = 'italic';
-    cardBody.appendChild(notesLabel);
-    cardBody.appendChild(notes);
+  // Suggestions (multiple suggesters and notes)
+  if (movie.suggestions && movie.suggestions.length > 0) {
+    const suggestionsContainer = el('div', 'suggestions-container mb-2');
+    
+    if (movie.suggestions.length === 1) {
+      // Single suggestion - display normally
+      const suggestion = movie.suggestions[0];
+      const suggester = el('small', 'text-muted mb-2');
+      suggester.textContent = `Suggested by ${suggestion.suggester || 'Anonymous'}`;
+      suggestionsContainer.appendChild(suggester);
+      
+      if (suggestion.notes) {
+        const notesLabel = el('strong', 'd-block mt-2 text-primary'); 
+        notesLabel.textContent = 'Notes:';
+        const notes = el('p', 'card-text small mb-2');
+        notes.textContent = suggestion.notes;
+        notes.style.fontStyle = 'italic';
+        suggestionsContainer.appendChild(notesLabel);
+        suggestionsContainer.appendChild(notes);
+      }
+    } else {
+      // Multiple suggestions - display as list
+      const suggestionTitle = el('strong', 'd-block mt-2 text-primary');
+      suggestionTitle.textContent = `Suggested by ${movie.suggestions.length} people:`;
+      suggestionsContainer.appendChild(suggestionTitle);
+      
+      movie.suggestions.forEach((suggestion, index) => {
+        const suggestionDiv = el('div', 'suggestion-item mb-2 p-2 border-start border-2 border-light');
+        
+        const suggesterName = el('small', 'text-muted d-block');
+        suggesterName.innerHTML = `<strong>${suggestion.suggester || 'Anonymous'}</strong>`;
+        if (suggestion.created_at) {
+          const date = new Date(suggestion.created_at);
+          suggesterName.innerHTML += ` <span class="text-muted">(${date.toLocaleDateString()})</span>`;
+        }
+        suggestionDiv.appendChild(suggesterName);
+        
+        if (suggestion.notes) {
+          const notes = el('p', 'card-text small mb-0 mt-1');
+          notes.textContent = suggestion.notes;
+          notes.style.fontStyle = 'italic';
+          suggestionDiv.appendChild(notes);
+        }
+        
+        suggestionsContainer.appendChild(suggestionDiv);
+      });
+    }
+    
+    cardBody.appendChild(suggestionsContainer);
+  } else {
+    // Fallback for old data format
+    const suggester = el('small', 'text-muted mb-2');
+    suggester.textContent = movie.suggester ? `Suggested by ${movie.suggester}` : 'Anonymous';
+    cardBody.appendChild(suggester);
+    
+    if (movie.notes) {
+      const notesLabel = el('strong', 'd-block mt-2 text-primary'); 
+      notesLabel.textContent = 'Notes:';
+      const notes = el('p', 'card-text small mb-2');
+      notes.textContent = movie.notes;
+      notes.style.fontStyle = 'italic';
+      cardBody.appendChild(notesLabel);
+      cardBody.appendChild(notes);
+    }
   }
   
   // Collapsible details
@@ -306,6 +472,7 @@ function createDetailedMovieCard(movie) {
 }
 
 function renderFilteredMovies(movies) {
+  const startTime = performance.now();
   const container = document.getElementById('movies-list');
   const countElement = document.getElementById('movie-count');
   
@@ -317,10 +484,31 @@ function renderFilteredMovies(movies) {
     return;
   }
   
-  movies.forEach(movie => {
-    const movieCard = createDetailedMovieCard(movie);
-    container.appendChild(movieCard);
-  });
+  // Batch rendering for better performance
+  const batchSize = 6; // Render 6 movies at a time
+  let currentIndex = 0;
+  
+  function renderBatch() {
+    const endIndex = Math.min(currentIndex + batchSize, movies.length);
+    const fragment = document.createDocumentFragment();
+    
+    for (let i = currentIndex; i < endIndex; i++) {
+      const movieCard = createDetailedMovieCard(movies[i]);
+      fragment.appendChild(movieCard);
+    }
+    
+    container.appendChild(fragment);
+    currentIndex = endIndex;
+    
+    if (currentIndex < movies.length) {
+      // Schedule next batch
+      requestAnimationFrame(renderBatch);
+    } else {
+    }
+  }
+  
+  // Start rendering first batch
+  renderBatch();
   
   if (countElement) {
     countElement.textContent = `Showing ${movies.length} of ${originalMoviesData.length} movies`;
@@ -508,11 +696,19 @@ function populateFilterOptions() {
   
   originalMoviesData.forEach(movie => {
     try {
-      const genres = movie.genres ? (typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres) : [];
+      const genres = typeof movie.genres === 'string' ? JSON.parse(movie.genres) : movie.genres;
       genres.forEach(genre => allGenres.add(genre));
     } catch (e) {}
     
-    if (movie.suggester) {
+    // Collect suggesters from suggestions array
+    if (movie.suggestions && Array.isArray(movie.suggestions)) {
+      movie.suggestions.forEach(suggestion => {
+        if (suggestion.suggester) {
+          allSuggesters.add(suggestion.suggester);
+        }
+      });
+    } else if (movie.suggester) {
+      // Fallback for old data format
       allSuggesters.add(movie.suggester);
     }
   });
@@ -561,7 +757,16 @@ function applyFilters() {
     }
     
     // Filter by suggester
-    const matchesSuggester = !selectedSuggester || movie.suggester === selectedSuggester;
+    let matchesSuggester = !selectedSuggester;
+    if (!matchesSuggester) {
+      // Check if any suggestion matches the selected suggester
+      if (movie.suggestions && Array.isArray(movie.suggestions)) {
+        matchesSuggester = movie.suggestions.some(suggestion => suggestion.suggester === selectedSuggester);
+      } else if (movie.suggester === selectedSuggester) {
+        // Fallback for old data format
+        matchesSuggester = true;
+      }
+    }
     
     return matchesSearch && matchesGenre && matchesSuggester;
   });
@@ -570,47 +775,94 @@ function applyFilters() {
   renderFilteredMovies(filteredMovies);
 }
 
+function createPodiumDisplayPublic(sortedResults) {
+  const podiumContainer = document.getElementById('podium-display');
+  
+  if (!podiumContainer || sortedResults.length === 0) return;
+
+  let podiumHTML = '<div class="podium-container">';
+  
+  // Display top 3 movies on podium
+  for (let i = 0; i < Math.min(3, sortedResults.length); i++) {
+    const movie = sortedResults[i];
+    const position = i + 1;
+    const positionClass = position === 1 ? 'first' : position === 2 ? 'second' : 'third';
+    const emoji = position === 1 ? '🥇' : position === 2 ? '🥈' : '🥉';
+    
+    podiumHTML += `
+      <div class="podium-item ${positionClass}">
+        <div class="podium-position">${emoji}</div>
+        <div class="podium-movie-title">${movie.title}</div>
+        <div class="podium-score">${movie.score} pts</div>
+      </div>
+    `;
+  }
+  
+  podiumHTML += '</div>';
+  podiumContainer.innerHTML = podiumHTML;
+}
+
+function createRankingBarsPublic(sortedResults) {
+  const barsContainer = document.getElementById('ranking-bars');
+  
+  if (!barsContainer || sortedResults.length === 0) return;
+
+  const maxScore = sortedResults[0].score;
+  let barsHTML = '';
+  
+  sortedResults.forEach((movie, index) => {
+    const percentage = maxScore > 0 ? (movie.score / maxScore) * 100 : 0;
+    const rankClass = index < 3 ? `rank-${index + 1}` : 'rank-other';
+    
+    barsHTML += `
+      <div class="ranking-bar-container">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <strong>${index + 1}. ${movie.title}</strong>
+          <span class="badge bg-primary">${movie.score} pts</span>
+        </div>
+        <div class="ranking-bar ${rankClass}" style="width: ${percentage}%;">
+          <span class="fw-bold">${movie.score} points</span>
+        </div>
+      </div>
+    `;
+  });
+  
+  barsContainer.innerHTML = barsHTML;
+}
+
 async function renderResults() {
   // optionally take a meetingId via arguments
   const meetingId = arguments[0];
+  
   const results = meetingId ? await fetchResults(meetingId) : await fetchResults();
+  
   const container = document.getElementById('results-list');
   if (!container) return; // no results area on this page
+  
   container.innerHTML = '';
   // hide movies with zero votes
   const nonZeroResults = (results || []).filter(r => (r.score || 0) > 0);
+  
   if (!nonZeroResults.length) {
     container.innerHTML = '<div class="text-muted">No votes yet.</div>';
     // also clear winner area if present
     const moviesContainerEmpty = document.getElementById('movies-list');
     if (moviesContainerEmpty) moviesContainerEmpty.innerHTML = '<div class="text-muted">No winning suggestion yet.</div>';
+    
+    // Clear enhanced visualizations
+    const podiumContainer = document.getElementById('podium-display');
+    const barsContainer = document.getElementById('ranking-bars');
+    if (podiumContainer) podiumContainer.innerHTML = '<p class="text-muted text-center">No votes to display</p>';
+    if (barsContainer) barsContainer.innerHTML = '';
     return;
   }
-  const list = el('ol', 'list-group list-group-numbered');
-  for (const r of nonZeroResults) {
-    const li = el('li', 'list-group-item d-flex justify-content-between align-items-start');
-    const div = el('div');
-    const title = el('div', 'fw-bold'); title.textContent = r.title;
-    
-    // Add genres below title
-    const genresHtml = renderGenres(r.genres);
-    if (genresHtml) {
-      const genresDiv = el('div');
-      genresDiv.innerHTML = genresHtml;
-      div.appendChild(title);
-      div.appendChild(genresDiv);
-    } else {
-      div.appendChild(title);
-    }
-    
-    const notes = el('div'); notes.textContent = r.notes || '';
-    div.appendChild(notes);
-    const badge = el('span', 'badge bg-primary rounded-pill'); badge.textContent = r.score || 0;
-    li.appendChild(div);
-    li.appendChild(badge);
-    list.appendChild(li);
-  }
-  container.appendChild(list);
+
+  // Create enhanced visualizations
+  createPodiumDisplayPublic(nonZeroResults);
+  createRankingBarsPublic(nonZeroResults);
+  
+  // Clear the results-list container (no longer showing numbered list since we have ranking bars)
+  container.innerHTML = '';
 
   // Render top winner in the suggestions area (if present on this page)
   const moviesContainer = document.getElementById('movies-list');
@@ -620,6 +872,8 @@ async function renderResults() {
       moviesContainer.innerHTML = '<div class="text-muted">No winning suggestion yet.</div>';
     } else {
       const genresHtml = renderGenres(top.genres);
+      const suggestionInfo = renderSuggestions(top);
+      
       const card = `
         <div class="col-12">
           <div class="card flex-row">
@@ -629,8 +883,8 @@ async function renderResults() {
             <div class="card-body">
               <h3 class="card-title">${top.title}</h3>
               ${genresHtml}
-              <p class="card-text">${top.notes || ''}</p>
-              <div class="text-muted">Suggested by: ${top.suggester || 'Anonymous'}</div>
+              ${suggestionInfo.notesHtml}
+              <div class="text-muted">Suggested by: ${suggestionInfo.suggesterText}</div>
               <div class="mt-2"><strong>Score: ${top.score || 0}</strong></div>
             </div>
           </div>
@@ -644,7 +898,7 @@ async function renderResults() {
 // Fetch meetings
 async function fetchMeetings() {
   try {
-    const res = await fetch('/api/meetings');
+    const res = await fetch(`${API_BASE}/meetings`);
     if (!res.ok) {
       throw new Error(`HTTP error! status: ${res.status}`);
     }
@@ -706,10 +960,13 @@ function renderAvailabilityInputs(container, meeting) {
       
       // Add click handler for the card
       dateCard.addEventListener('click', (e) => {
-        if (e.target !== checkbox) {
-          checkbox.checked = !checkbox.checked;
+        // If clicking directly on the checkbox or its label, let the browser handle it naturally
+        if (e.target === checkbox || e.target === label) {
+          return;
         }
-        updateDateCardStyle(dateCard, checkbox.checked);
+        // For clicks elsewhere on the card, manually toggle the checkbox
+        checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
       });
       
       // Style the card based on selection
@@ -888,14 +1145,18 @@ async function populateMeetingSelectors() {
   const meetings = await fetchMeetings();
 
   // Determine the single open meeting (if any). If none open, fall back to the last finished meeting.
-  const openMeeting = meetings.find(m => m.voting_open == 1) || null;
-  const lastFinished = (!openMeeting) ? meetings.find(m => m.voting_open == 0) || null : null;
+  const openMeeting = meetings.find(m => m.voting_open === true || m.voting_open === 1) || null;
+  const lastFinished = (!openMeeting) ? meetings.find(m => m.voting_open === false || m.voting_open === 0) || null : null;
   // Expose globally for vote submission to use
   window.currentOpenMeeting = openMeeting || lastFinished || null;
+  
 
   // Update vote page UI (meeting name) and prepare availability + ranks
   const meetingNameElem = document.getElementById('meeting-name');
+  const meetingNotesElem = document.getElementById('meeting-notes');
+  const meetingNotesContentElem = document.getElementById('meeting-notes-content');
   const voteAvailabilityContainer = document.getElementById('availability-container');
+  
   if (meetingNameElem) {
     if (window.currentOpenMeeting) {
       meetingNameElem.textContent = window.currentOpenMeeting.name || window.currentOpenMeeting.date || `Meeting ${window.currentOpenMeeting.id}`;
@@ -903,11 +1164,21 @@ async function populateMeetingSelectors() {
       meetingNameElem.textContent = '(no meeting currently open for voting)';
     }
   }
+  
+  // Show meeting notes if they exist
+  if (meetingNotesElem && meetingNotesContentElem) {
+    if (window.currentOpenMeeting && window.currentOpenMeeting.notes) {
+      meetingNotesContentElem.textContent = window.currentOpenMeeting.notes;
+      meetingNotesElem.classList.remove('d-none');
+    } else {
+      meetingNotesElem.classList.add('d-none');
+    }
+  }
   if (voteAvailabilityContainer) {
     if (window.currentOpenMeeting) {
       renderAvailabilityInputs(voteAvailabilityContainer, window.currentOpenMeeting);
       await populateRankSelectors(window.currentOpenMeeting.allowed_movie_ids || null);
-      await renderMovies();
+      await renderMovies(window.currentOpenMeeting.allowed_movie_ids || null);
     } else {
       voteAvailabilityContainer.innerHTML = '<div class="text-muted">No open meeting for voting.</div>';
       await populateRankSelectors();
@@ -1005,7 +1276,7 @@ if (meetingForm) {
     try {
       const headers = { 'Content-Type':'application/json' };
       const token = getAdminToken(); if (token) headers['X-Admin-Token'] = token;
-      const res = await fetch('/api/meetings', { method: 'POST', headers, body: JSON.stringify({ name, date, candidate_days, allowed_movie_ids, voting_open }) });
+      const res = await fetch(`${API_BASE}/meetings`, { method: 'POST', headers, body: JSON.stringify({ name, date, candidate_days, allowed_movie_ids, voting_open }) });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         const errMsg = body && body.error ? body.error : `Failed to create meeting (status ${res.status})`;
@@ -1023,9 +1294,10 @@ if (meetingForm) {
 }
 
 async function populateRankSelectors(allowedMovieIds) {
-  let movies = await fetchMovies();
+  let movies = await fetchMoviesWithCache();
   if (allowedMovieIds && Array.isArray(allowedMovieIds)) {
-    const allowedSet = new Set(allowedMovieIds.map(String));
+    const validIds = allowedMovieIds.filter(id => id !== null && id !== undefined);
+    const allowedSet = new Set(validIds.map(String));
     movies = movies.filter(m => allowedSet.has(String(m.id)));
   }
   const rank1 = document.getElementById('rank1');
@@ -1128,9 +1400,11 @@ if (suggestForm) {
     const suggester = document.getElementById('suggest-name').value.trim();
     const msg = document.getElementById('suggest-msg');
     msg.textContent = '';
+    msg.className = 'mt-2';
     
     if (!title) { 
       msg.textContent = 'Title required'; 
+      msg.className = 'mt-2 text-danger';
       return; 
     }
     
@@ -1138,6 +1412,7 @@ if (suggestForm) {
     const imdbRe = /imdb\.com\/title\/(tt\d+)/i;
     if (!poster || !imdbRe.test(poster)) { 
       msg.textContent = 'Poster must be an IMDB movie link (https://www.imdb.com/title/tt...)'; 
+      msg.className = 'mt-2 text-danger';
       return; 
     }
     
@@ -1146,16 +1421,52 @@ if (suggestForm) {
       submitBtn.textContent = 'Loading poster...';
     }
     
-    const res = await fetch('/api/movies', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title, poster, notes, suggester }) });
-    if (!res.ok) throw new Error('Failed');
+    const res = await fetch(`${API_BASE}/movies`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title, poster, notes, suggester }) });
     
-    await renderMovies();
-    await populateRankSelectors();
-    msg.textContent = 'Suggestion submitted!';
+    if (!res.ok) {
+      // Try to get error message from response
+      let errorMessage = 'Error submitting suggestion';
+      try {
+        const errorData = await res.json();
+        if (errorData.error) {
+          errorMessage = errorData.error;
+        }
+      } catch (e) {
+        // Use default error message if can't parse response
+      }
+      throw new Error(errorMessage);
+    }
+    
+    // Parse the response to check if this was a new movie or merged suggestion
+    const responseData = await res.json();
+    
+    // Refresh movies and selectors, respecting meeting filtering if on voting page
+    const isVotePage = window.location.pathname.includes('vote') || document.getElementById('vote-form');
+    const isResultsPage = window.location.pathname.includes('results') || document.getElementById('results-list');
+    
+    if (isVotePage && window.currentOpenMeeting && window.currentOpenMeeting.allowed_movie_ids) {
+      await renderMovies(window.currentOpenMeeting.allowed_movie_ids);
+      await populateRankSelectors(window.currentOpenMeeting.allowed_movie_ids);
+    } else if (!isResultsPage) {
+      // Don't refresh movies on results page
+      await renderMovies();
+      await populateRankSelectors();
+    }
+    
+    // Show appropriate success message
+    if (responseData && responseData.suggestions && responseData.suggestions.length > 1) {
+      msg.textContent = 'Your suggestion has been added to the existing movie!';
+      msg.className = 'mt-2 text-success';
+    } else {
+      msg.textContent = 'New movie suggestion submitted!';
+      msg.className = 'mt-2 text-success';
+    }
+    
     document.getElementById('suggest-form').reset();
   } catch (err) {
     const msg = document.getElementById('suggest-msg');
-    msg.textContent = 'Error submitting suggestion';
+    msg.textContent = err.message || 'Error submitting suggestion';
+    msg.className = 'mt-2 text-danger';
   } finally {
     // Always re-enable the submit button and restore original text
     if (submitBtn) {
@@ -1192,9 +1503,9 @@ if (voteForm) {
     return;
   }
   const ranks = [
-    { rank: 1, movieId: Number(r1) },
-    { rank: 2, movieId: Number(r2) },
-    { rank: 3, movieId: Number(r3) }
+    { rank: 1, movieId: r1 },
+    { rank: 2, movieId: r2 },
+    { rank: 3, movieId: r3 }
   ];
   // collect availability
   let availability = [];
@@ -1223,15 +1534,28 @@ if (voteForm) {
     }
   }
   try {
-    const res = await fetch('/api/votes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ username, ranks, meetingId, availability }) });
+    const payload = { username, ranks, meetingId, availability };
+    
+    const res = await fetch(`${API_BASE}/votes`, { 
+      method: 'POST', 
+      headers: {'Content-Type':'application/json'}, 
+      body: JSON.stringify(payload) 
+    });
+    
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to submit votes');
-    msg.textContent = 'Votes submitted!';
+    
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to submit votes');
+    }
+    
+    msg.textContent = 'Votes submitted successfully!';
+    msg.className = 'mt-2 text-success';
     document.getElementById('vote-form').reset();
     await renderResults();
     await populateRankSelectors();
   } catch (err) {
     msg.textContent = err.message || 'Error submitting votes';
+    msg.className = 'mt-2 text-danger';
   }
   });
 }
@@ -1240,9 +1564,22 @@ if (voteForm) {
 (async function init() {
   // Run only the parts needed on the current page
   await populateMeetingSelectors();
-  await renderMovies();
-  await populateRankSelectors();
-  await renderResults();
+  
+  // Check if we're on the voting page and should filter movies by meeting
+  const isVotePage = window.location.pathname.includes('vote') || document.getElementById('vote-form');
+  const isResultsPage = window.location.pathname.includes('results') || document.getElementById('results-list');
+  
+  if (isVotePage && window.currentOpenMeeting && window.currentOpenMeeting.allowed_movie_ids) {
+    // On voting pages, render movies filtered by the current meeting
+    await renderMovies(window.currentOpenMeeting.allowed_movie_ids);
+    await populateRankSelectors(window.currentOpenMeeting.allowed_movie_ids);
+  } else if (!isResultsPage) {
+    // On other pages (except results), show all movies
+    await renderMovies();
+    await populateRankSelectors();
+  }
+  // Skip renderMovies() on results page to prevent the flash of all movies
+  // renderResults() is called by updateMeetingUI with correct meetingId
   // if there is a meetings list on the page, render it now
   if (document.getElementById('meetings-list')) await renderMeetingsList();
   // Admin UI setup for meetings page
@@ -1273,7 +1610,7 @@ if (voteForm) {
       adminMsg.textContent = '';
       const pw = passInput.value || '';
       try {
-        const res = await fetch('/api/admin/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ password: pw }) });
+        const res = await fetch(`${API_BASE}/admin/login`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ password: pw }) });
         const body = await res.json().catch(() => null);
         if (!res.ok) throw new Error(body && body.error ? body.error : 'login failed');
         setAdminToken(body.token);
@@ -1287,7 +1624,7 @@ if (voteForm) {
     logoutBtn.addEventListener('click', async () => {
       try {
         const token = getAdminToken();
-        await fetch('/api/admin/logout', { method: 'POST', headers: { 'X-Admin-Token': token } }).catch(()=>{});
+        await fetch(`${API_BASE}/admin/logout`, { method: 'POST', headers: { 'X-Admin-Token': token } }).catch(()=>{});
       } catch(e){}
       setAdminToken(null);
       await refreshAdminUI();
