@@ -25,7 +25,7 @@ Skip this section if you're just connecting to the existing `distributed-denial-
 1. `firebase login` (interactive) and `firebase use distributed-denial-of-screen`.
 2. Point `GOOGLE_APPLICATION_CREDENTIALS` at the service-account JSON, or paste the JSON into `FIREBASE_SERVICE_ACCOUNT_KEY`. See `.env.firebase.example`.
 3. Generate a bcrypt admin hash with `node generate-password-hash.js` and set `ADMIN_PASSWORD_HASH` in `.env`. **The servers read the hash, not a plaintext password.**
-4. Push local env into Functions config: `./set-firebase-env.sh`. This copies `ADMIN_PASSWORD_HASH` and `TMDB_API_KEY` into `firebase functions:config`.
+4. Write `functions/.env` from your root `.env`: `./set-firebase-env.sh`. Firebase Functions reads runtime env from that file at deploy time. (The older `firebase functions:config:set` API is deprecated and no longer works on current CLI versions.)
 5. Deploy Firestore rules once so the DB isn't wide open: `npm run deploy:firestore`.
 
 ## Running against Firebase

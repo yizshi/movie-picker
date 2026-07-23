@@ -92,19 +92,25 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=./service-account.json" >> $GITHUB_ENV
           echo "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> $GITHUB_ENV
 
-      - name: Configure Firebase Functions environment
+      - name: Write functions/.env for deploy
+        # Firebase Functions now reads runtime env from functions/.env. The old
+        # `firebase functions:config:set` command is deprecated and fails on
+        # current CLI versions.
         run: |
-          firebase functions:config:set \
-            app.admin_password_hash="${{ secrets.ADMIN_PASSWORD_HASH }}" \
-            app.tmdb_api_key="${{ secrets.TMDB_API_KEY }}" \
-            --project ${{ secrets.FIREBASE_PROJECT_ID }} \
-            --token ${{ secrets.FIREBASE_TOKEN }}
+          cat > functions/.env <<EOF
+          ADMIN_PASSWORD_HASH=${{ secrets.ADMIN_PASSWORD_HASH }}
+          TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}
+          EOF
 
       - name: Deploy to Firebase
         run: |
           firebase deploy \
             --project ${{ secrets.FIREBASE_PROJECT_ID }} \
             --token ${{ secrets.FIREBASE_TOKEN }}
+
+      - name: Clean up functions/.env
+        if: always()
+        run: rm -f functions/.env
 
       - name: Clean up service account file
         if: always()
