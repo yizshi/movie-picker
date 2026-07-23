@@ -532,16 +532,39 @@ async function verifyPassword(inputPassword, storedHash, storedPlaintext) {
   
   return false;
 }
-// token -> expiry (ms since epoch)
-const adminTokens = new Map();
-function genToken() { return crypto.randomBytes(24).toString('hex'); }
+// Stateless HMAC-signed admin tokens: `<expMs>.<hmacHex>`.
+// See functions/index.js for rationale — keeping parity across backends.
+const TOKEN_SECRET = ADMIN_PASSWORD_HASH || ADMIN_PASSWORD_PLAINTEXT || 'unset-token-secret';
+const ADMIN_TOKEN_TTL_MS = 1000 * 60 * 60; // 1 hour
+
+function signAdminToken(ttlMs = ADMIN_TOKEN_TTL_MS) {
+  const exp = Date.now() + ttlMs;
+  const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(String(exp)).digest('hex');
+  return `${exp}.${sig}`;
+}
+
+function verifyAdminToken(token) {
+  if (!token || typeof token !== 'string') return false;
+  const dot = token.indexOf('.');
+  if (dot <= 0) return false;
+  const expStr = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const exp = Number(expStr);
+  if (!Number.isFinite(exp) || Date.now() > exp) return false;
+  const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(expStr).digest('hex');
+  const a = Buffer.from(sig, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function extractToken(req) {
+  return req.get('X-Admin-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/, '');
+}
+
 function requireAdmin(req, res, next) {
-  const token = req.get('X-Admin-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/, '');
+  const token = extractToken(req);
   if (!token) return res.status(401).json({ error: 'admin token required' });
-  const exp = adminTokens.get(token);
-  if (!exp) return res.status(401).json({ error: 'invalid token' });
-  if (Date.now() > exp) { adminTokens.delete(token); return res.status(401).json({ error: 'token expired' }); }
-  // token valid
+  if (!verifyAdminToken(token)) return res.status(401).json({ error: 'invalid or expired token' });
   req.admin = true;
   next();
 }
@@ -555,25 +578,16 @@ app.post('/api/admin/login', async (req, res) => {
     return res.status(401).json({ error: 'invalid password' });
   }
   
-  const token = genToken();
-  const ttl = 1000 * 60 * 60 * 4; // 4 hours
-  adminTokens.set(token, Date.now() + ttl);
-  
-  res.json({ token, expiresIn: ttl });
+  const token = signAdminToken();
+  res.json({ token, expiresIn: ADMIN_TOKEN_TTL_MS });
 });
 
 app.post('/api/admin/logout', (req, res) => {
-  const token = req.get('X-Admin-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/, '');
-  if (token) adminTokens.delete(token);
   res.json({ ok: true });
 });
 
 app.get('/api/admin/me', (req, res) => {
-  const token = req.get('X-Admin-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/, '');
-  if (!token) return res.json({ admin: false });
-  const exp = adminTokens.get(token);
-  if (!exp || Date.now() > exp) { if (exp) adminTokens.delete(token); return res.json({ admin: false }); }
-  res.json({ admin: true });
+  res.json({ admin: verifyAdminToken(extractToken(req)) });
 });
 
 // Meeting CRUD operations
