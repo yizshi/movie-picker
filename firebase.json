@@ -7,23 +7,15 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "headers": [
+      {
+        "source": "/api/**",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-store" }
+        ]
+      }
+    ],
     "rewrites": [
-      {
-        "source": "/api/movies",
-        "function": "api"
-      },
-      {
-        "source": "/api/meetings",
-        "function": "api"
-      },
-      {
-        "source": "/api/results",
-        "function": "api"
-      },
-      {
-        "source": "/api/test",
-        "function": "api"
-      },
       {
         "source": "/api/**",
         "function": "api"

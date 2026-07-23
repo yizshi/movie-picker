@@ -34,6 +34,16 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// API responses must not be cached by the Firebase Hosting CDN. During the
+// hosting-rewrite bugfix we discovered that 404s from the function were
+// being cached for 10 minutes (the Firebase default), which meant users
+// still saw the broken pre-fix behavior long after the actual code was
+// fixed. Force revalidation on every request.
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Firebase Hosting rewrites forward the full path (e.g. `/api/movies`) to the
 // function, while direct function invocations arrive without the `/api`
 // prefix (Firebase strips the function name). Strip the prefix here so
