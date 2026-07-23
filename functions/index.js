@@ -34,6 +34,16 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// Firebase Hosting rewrites forward the full path (e.g. `/api/movies`) to the
+// function, while direct function invocations arrive without the `/api`
+// prefix (Firebase strips the function name). Strip the prefix here so
+// routes below can be defined once (`/movies`) and work either way.
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api/')) req.url = req.url.slice(4);
+  else if (req.url === '/api') req.url = '/';
+  next();
+});
+
 // Test endpoint
 app.get('/test', (req, res) => {
   res.json({ message: 'Firebase Functions are working!', timestamp: new Date().toISOString() });
