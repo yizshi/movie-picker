@@ -112,28 +112,41 @@ async function checkIsAdmin() {
   try { const body = await res.json(); return !!body.admin; } catch(e){ return false; }
 }
 
-// Store original movies data for filtering and caching
+// Store original movies data for filtering
 let originalMoviesData = [];
 let currentFilteredMovies = [];
-let moviesCache = null;
-let cacheTimestamp = 0;
+
+// Movies cache persists in sessionStorage so navigating between pages skips
+// the API call. TTL keeps stale data from lingering; mutations call
+// invalidateMoviesCache() to force a refresh on the next read.
+const MOVIES_CACHE_KEY = 'moviesCache';
 const CACHE_DURATION = 30000; // 30 seconds
 
-// Enhanced fetchMovies with caching
+function readMoviesCache() {
+  try {
+    const raw = sessionStorage.getItem(MOVIES_CACHE_KEY);
+    if (!raw) return null;
+    const { movies, ts } = JSON.parse(raw);
+    if (Date.now() - ts >= CACHE_DURATION) return null;
+    return movies;
+  } catch (e) { return null; }
+}
+
+function writeMoviesCache(movies) {
+  try {
+    sessionStorage.setItem(MOVIES_CACHE_KEY, JSON.stringify({ movies, ts: Date.now() }));
+  } catch (e) { /* quota or private-mode; ignore */ }
+}
+
+function invalidateMoviesCache() {
+  try { sessionStorage.removeItem(MOVIES_CACHE_KEY); } catch (e) {}
+}
+
 async function fetchMoviesWithCache() {
-  const now = Date.now();
-  
-  // Return cached data if still fresh
-  if (moviesCache && (now - cacheTimestamp) < CACHE_DURATION) {
-    return moviesCache;
-  }
-  
+  const cached = readMoviesCache();
+  if (cached) return cached;
   const movies = await fetchMovies();
-  
-  // Cache the result
-  moviesCache = movies;
-  cacheTimestamp = now;
-  
+  writeMoviesCache(movies);
   return movies;
 }
 
@@ -1423,6 +1436,7 @@ if (suggestForm) {
     }
     
     const res = await fetch(`${API_BASE}/movies`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ title, poster, notes, suggester }) });
+    invalidateMoviesCache();
     
     if (!res.ok) {
       // Try to get error message from response
