@@ -102,37 +102,29 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Helpers
+function formatMovieRow(movie) {
+  let suggestions = [];
+  if (movie.suggestions) {
+    try { suggestions = JSON.parse(movie.suggestions); } catch (e) { suggestions = []; }
+  } else if (movie.suggester || movie.notes) {
+    suggestions = [{
+      suggester: movie.suggester || 'Anonymous',
+      notes: movie.notes || null,
+      created_at: movie.created_at
+    }];
+  }
+  return {
+    ...movie,
+    suggestions,
+    // Flat suggester/notes for backward compatibility with existing frontend + API consumers
+    suggester: suggestions.length > 0 ? suggestions[0].suggester : null,
+    notes: suggestions.length > 0 ? suggestions[0].notes : null
+  };
+}
+
 function getMovies() {
-  const stmt = db.prepare('SELECT * FROM movies ORDER BY created_at DESC');
-  const movies = stmt.all();
-  
-  // Handle backward compatibility and format suggestions
-  return movies.map(movie => {
-    let suggestions = [];
-    
-    if (movie.suggestions) {
-      try {
-        suggestions = JSON.parse(movie.suggestions);
-      } catch (e) {
-        suggestions = [];
-      }
-    } else if (movie.suggester || movie.notes) {
-      // Old format - convert to new format
-      suggestions = [{
-        suggester: movie.suggester || 'Anonymous',
-        notes: movie.notes || null,
-        created_at: movie.created_at
-      }];
-    }
-    
-    return {
-      ...movie,
-      suggestions: suggestions,
-      // Maintain backward compatibility for existing frontend code
-      suggester: suggestions.length > 0 ? suggestions[0].suggester : null,
-      notes: suggestions.length > 0 ? suggestions[0].notes : null
-    };
-  });
+  const rows = db.prepare('SELECT * FROM movies ORDER BY created_at DESC').all();
+  return rows.map(formatMovieRow);
 }
 
 const http = require('http');
@@ -300,7 +292,7 @@ app.post('/api/movies', async (req, res) => {
 
       // Return updated movie
       const updatedMovie = db.prepare('SELECT * FROM movies WHERE id = ?').get(existingMovie.id);
-      return res.json(updatedMovie);
+      return res.json(formatMovieRow(updatedMovie));
     }
 
     // Movie doesn't exist, create new one
@@ -334,7 +326,7 @@ app.post('/api/movies', async (req, res) => {
     const stmt = db.prepare('INSERT INTO movies (title, poster, genres, metadata, imdb_id, suggestions) VALUES (?, ?, ?, ?, ?, ?)');
     const info = stmt.run(title, finalPosterUrl || null, finalGenres || null, finalMetadata || null, imdbId, JSON.stringify(suggestions));
     const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(info.lastInsertRowid);
-    res.json(movie);
+    res.json(formatMovieRow(movie));
   } catch (err) {
     console.error('Error creating/updating movie:', err);
     res.status(500).json({ error: 'Failed to create movie' });

@@ -68,11 +68,12 @@ describe('Firebase Functions', () => {
 
   describe('Utility Functions', () => {
     test('should generate random tokens', () => {
-      const genToken = () => Math.random().toString(36).substring(2);
-      
+      const crypto = require('crypto');
+      const genToken = () => crypto.randomBytes(24).toString('hex');
+
       const token1 = genToken();
       const token2 = genToken();
-      
+
       expect(token1).toBeDefined();
       expect(token2).toBeDefined();
       expect(token1).not.toBe(token2);
