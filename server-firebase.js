@@ -603,7 +603,10 @@ app.get('/api/meetings', async (req, res) => {
 
     const watchedById = new Map(
       watchedDocs.filter(d => d.exists).map(d => {
-        const data = d.data();
+        // Strip fat legacy poster-cache fields — see functions/index.js.
+        const { poster_cached_data, poster_cached_content_type, poster_cached_date,
+                poster_cached_size, poster_original_url, poster_optimized_url,
+                ...data } = d.data();
         return [d.id, { id: d.id, ...data, poster: optimizePosterUrl(data.poster) }];
       })
     );

@@ -620,7 +620,12 @@ app.get('/meetings', async (req, res) => {
 
     const watchedById = new Map(
       watchedDocs.filter(d => d.exists).map(d => {
-        const data = d.data();
+        // Strip fat legacy poster-cache fields — one row still has a ~70KB
+        // base64 blob in `poster_cached_data` from an earlier caching
+        // experiment, which blew up the /meetings response to ~90KB.
+        const { poster_cached_data, poster_cached_content_type, poster_cached_date,
+                poster_cached_size, poster_original_url, poster_optimized_url,
+                ...data } = d.data();
         return [d.id, { id: d.id, ...data, poster: optimizePosterUrl(data.poster) }];
       })
     );
