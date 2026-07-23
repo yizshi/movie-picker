@@ -46,8 +46,8 @@ To enable the automated testing and deployment pipeline, you need to configure t
 
 - ⚠️  **Never commit these secrets to your repository**
 - ✅ **Secrets are encrypted and only accessible during GitHub Actions runs**
-- ✅ **Rotate secrets regularly, especially Firebase tokens**
-- ✅ **Use separate Firebase projects for staging/production if needed**
+- ✅ **Rotate `FIREBASE_TOKEN` and `FIREBASE_SERVICE_ACCOUNT_KEY` if a maintainer leaves**
+- ⚠️  **There is no staging environment — pushing to `main` deploys straight to production.** If that changes, add a second Firebase project and gate the deploy job on branch.
 
 ## Testing the Setup
 

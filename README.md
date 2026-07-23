@@ -100,112 +100,202 @@ node generate-password-hash.js
 
 ## 🔧 Development
 
-### Available Scripts
+### Architecture at a glance
+
+The app has three interchangeable backends that all expose the same `/api/*` surface:
+
+| Backend | Entry point | Data store | Used for |
+|---------|-------------|------------|----------|
+| SQLite server | `server.js` | `moviepicker.db` | Fast local dev, offline |
+| Local Firebase server | `server-firebase.js` | Firestore (live) | Testing against real cloud data |
+| Cloud Functions | `functions/index.js` | Firestore (live) | Production (behind Firebase Hosting rewrites) |
+
+`public/` is a static frontend served by all three. `firebase.json` rewrites `/api/**` to the `api` Cloud Function; everything else falls back to `index.html`.
+
+### Available scripts
 
 | Command | Description |
 |---------|-------------|
-| `npm start` | Start local SQLite server |
-| `npm run start:sqlite` | Start local SQLite server |
-| `npm run start:firebase` | Start local server with Firebase |
-| `npm run start:emulator` | Start Firebase emulators |
-| `npm run deploy` | Deploy to Firebase (hosting + functions) |
-| `npm run deploy:hosting` | Deploy only Firebase hosting |
-| `npm run deploy:functions` | Deploy only Firebase functions |
-| `npm run migrate` | Migrate SQLite data to Firebase |
-| `npm test` | Run test suite |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run test:coverage` | Generate test coverage report |
+| `npm start` / `npm run start:sqlite` | Local SQLite server on :3000 |
+| `npm run start:firebase` | Local server backed by live Firestore |
+| `npm run start:emulator` | Firebase emulators (functions + firestore + hosting) |
+| `npm run deploy` | Deploy hosting + functions + firestore |
+| `npm run deploy:hosting` | Hosting only (static frontend) |
+| `npm run deploy:functions` | Functions only (API) |
+| `npm run deploy:firestore` | Firestore rules + indexes only |
+| `npm run migrate` | One-shot migrate SQLite → Firestore |
+| `npm test` / `test:watch` / `test:coverage` | Root Jest suite |
+| `cd functions && npm test` | Functions Jest suite |
 
-### Project Structure
+### Day-to-day dev loop
+
+1. `cp .env.example .env` (or `.env.firebase.example` for the Firebase server) and fill in values. Note: the servers read `ADMIN_PASSWORD_HASH`, not `ADMIN_PASSWORD` — generate one with `node generate-password-hash.js`.
+2. Pick a backend:
+   - Frontend-only or logic changes → `npm run start:sqlite` (fastest).
+   - Anything touching Firestore shape, indexes, or Functions-specific code → `npm run start:firebase` or `npm run start:emulator`.
+3. Edit files. `public/` is served statically, so a browser refresh picks up frontend changes without restarting the server. Server / Functions edits require a restart.
+4. Before pushing: `npm test && (cd functions && npm test)`.
+
+### Project structure
 
 ```
 movie-picker/
-├── public/                 # Frontend files
-│   ├── index.html         # Main app page
-│   ├── admin-*.html       # Admin interfaces
-│   └── app.js             # Frontend JavaScript
-├── functions/             # Firebase Functions
-│   ├── index.js           # Cloud Functions API
-│   └── package.json       # Functions dependencies
-├── server.js              # Local SQLite server
-├── server-firebase.js     # Local Firebase server
-├── tests/                 # Test files
-│   ├── auth.test.js       # Authentication tests
-│   ├── api.test.js        # API endpoint tests
-│   ├── voting.test.js     # Voting logic tests
-│   └── setup.js           # Test setup and configuration
-├── .github/workflows/     # GitHub Actions CI/CD
-├── migrate-to-firebase.js # Migration utility
-├── generate-password-hash.js # Password hash generator
-├── jest.config.js         # Jest test configuration
-└── set-firebase-env.sh    # Firebase environment setup
+├── public/                    # Static frontend (served by all backends)
+│   ├── index.html             # Home
+│   ├── movies.html            # Browse all movies
+│   ├── suggest.html           # Add a movie
+│   ├── meetings.html          # List meetings
+│   ├── vote.html              # Cast a ballot
+│   ├── results.html           # Live results
+│   ├── watched.html / watched-list.html  # Watched history + reviews
+│   ├── admin-movies.html      # Admin: manage movies
+│   ├── admin-meetings.html    # Admin: manage meetings
+│   ├── admin-meeting-details.html  # Admin: single meeting drill-in
+│   ├── debug.html             # Debug tools
+│   ├── app.js                 # Shared frontend JS
+│   └── styles.css
+├── functions/                 # Firebase Cloud Functions (deployed API)
+│   ├── index.js               # All /api/* routes
+│   └── tests/                 # Functions Jest suite
+├── server.js                  # Local SQLite server
+├── server-firebase.js         # Local server, live Firestore
+├── tests/                     # Root Jest suite (auth, api, voting, frontend, nav)
+├── .github/workflows/ci-cd.yml
+├── firebase.json              # Hosting rewrites + functions + firestore config
+├── firestore.rules / firestore.indexes.json
+├── migrate-to-firebase.js     # SQLite → Firestore migration
+├── generate-password-hash.js  # bcrypt hash generator
+├── set-firebase-env.sh        # Push local env → functions:config
+└── *.js (utility scripts, see below)
 ```
 
-## 🚀 Deployment Guide
+### One-off utility scripts
 
-### Firebase Deployment
+These are ad-hoc admin scripts that talk directly to Firestore using the service-account key. Run with `node <script>.js`. They are **not** part of the app runtime.
 
-1. **Setup Firebase Project**
-   ```bash
-   npm install -g firebase-tools
-   firebase login
-   firebase init
-   ```
+| Script | Purpose |
+|--------|---------|
+| `check-movies.js` | Dump all movies + duplicate detection by IMDB id |
+| `merge-duplicates.js` | Merge movies that share an IMDB id |
+| `fix-all-movies.js` | Backfill missing IMDB ids via TMDB search |
+| `hide-all-movies.js` | Set `hidden: true` on every movie |
+| `cleanup-poster-cache.js` | Strip cached poster blobs from Firestore |
+| `cache-posters*.js` | Various poster-caching strategies |
+| `backfill-*.js` / `migrate-metadata.js` | One-time metadata backfills |
 
-2. **Configure Environment**
-   ```bash
-   ./set-firebase-env.sh
-   # Or manually: firebase functions:config:set app.admin_password_hash="$hash"
-   ```
+Prefer creating a new script over adding admin-only endpoints for one-off maintenance.
 
-3. **Deploy**
-   ```bash
-   npm run deploy
-   ```
+## 🚀 Deployment
+
+### Firebase project
+
+- Project id: `distributed-denial-of-screen` (see `.firebaserc`).
+- Runtime: Node.js 20 for Functions.
+- Hosting rewrites `/api/**` → `api` function; everything else → `index.html`.
+
+### First-time setup
+
+```bash
+npm install -g firebase-tools
+firebase login
+firebase use distributed-denial-of-screen
+./set-firebase-env.sh   # pushes ADMIN_PASSWORD_HASH + TMDB_API_KEY into functions:config
+```
+
+### Deploying
+
+Most changes touch either the frontend or the API, not both:
+
+```bash
+npm run deploy:hosting     # public/ only — fast, safe
+npm run deploy:functions   # functions/ only — restarts the API
+npm run deploy:firestore   # rules/indexes only
+npm run deploy             # everything (use sparingly)
+```
+
+Prefer the narrowest deploy that covers your change. A hosting deploy is near-instant; a functions deploy takes a couple of minutes and briefly warms cold starts.
+
+### Automated deploys (CI/CD)
+
+`.github/workflows/ci-cd.yml` does:
+
+1. **On every push and PR**: install deps, run root tests, run `functions/` tests, upload coverage.
+2. **On push to `main` (after tests pass)**: install firebase-tools, write the service-account key from `FIREBASE_SERVICE_ACCOUNT_KEY`, push `functions:config`, then `firebase deploy`.
+
+Required GitHub secrets (see [GITHUB_SECRETS_SETUP.md](GITHUB_SECRETS_SETUP.md)):
+- `ADMIN_PASSWORD_HASH` — bcrypt hash from `generate-password-hash.js`
+- `TMDB_API_KEY` — TMDB v4 bearer token
+- `FIREBASE_SERVICE_ACCOUNT_KEY` — full JSON of the service account
+- `FIREBASE_PROJECT_ID` — `distributed-denial-of-screen`
+- `FIREBASE_TOKEN` — CI deploy token from `firebase login:ci`
 
 ### Migration from SQLite to Firebase
+
 ```bash
-# Configure Firebase credentials in .env
+# Point .env at the target Firebase project
 npm run migrate
 ```
 
-### CI/CD Pipeline Setup
+Backs up nothing — snapshot Firestore first if the target isn't empty.
 
-This project includes automated GitHub Actions for testing and deployment:
+## 👀 Code review
 
-1. **Setup GitHub Secrets** (see [GITHUB_SECRETS_SETUP.md](GITHUB_SECRETS_SETUP.md))
-2. **Push to main branch** to trigger pipeline
-3. **Tests run automatically** on all pull requests
-4. **Deployment happens automatically** when tests pass on main branch
+### Pull request flow
 
-#### Pipeline Features:
-- ✅ **Automated Testing**: Runs full test suite on every push/PR
-- ✅ **Test Coverage**: Generates and uploads coverage reports
-- ✅ **Automated Deployment**: Deploys to Firebase when tests pass
-- ✅ **Environment Management**: Securely handles secrets and configs
-- ✅ **Multi-Environment**: Separate test and production environments
+1. Branch off `main`.
+2. Keep PRs small and focused. If a change touches the frontend, functions, and firestore rules together, call that out in the description.
+3. Push — CI runs both test suites automatically. A green build is required before merge.
+4. Merging to `main` auto-deploys. There is no staging environment, so treat main as production.
+
+### What reviewers should check
+
+- **API surface parity**: any new route added to `functions/index.js` should also exist in `server.js` and `server-firebase.js` if it's meant to be usable locally, and vice versa. Divergence between the three backends is the most common source of bugs.
+- **Firestore shape changes**: new fields or collections should be reflected in `firestore.rules`, `firestore.indexes.json` (if queried), and any relevant migration script.
+- **Auth**: admin-only routes must go through `requireAdmin`. Never trust `req.body.isAdmin` or similar.
+- **Secrets**: no keys in commits. `.env`, `service-account.json`, and `distributed-denial-of-screen-firebase-adminsdk-*.json` are gitignored — verify with `git status` before pushing.
+- **Frontend/API contract**: `public/app.js` is the single client. If you change response shape, grep for the field in `public/` before merging.
+- **Tests**: prefer adding a test to `tests/` (or `functions/tests/`) over manual verification. Voting/scoring logic in particular has a dedicated `voting.test.js`.
+
+### Local pre-flight
+
+```bash
+npm test
+(cd functions && npm test)
+npm run start:sqlite     # smoke-test the change against SQLite
+npm run start:firebase   # then against live Firestore if the change touches it
+```
+
+### Reviewing a PR locally
+
+```bash
+gh pr checkout <number>
+npm ci && (cd functions && npm ci)
+npm test
+npm run start:firebase   # or :sqlite
+```
 
 ## 📖 API Documentation
 
-### Public Endpoints
-- `GET /api/movies` - List all movies
-- `POST /api/movies` - Add new movie (requires IMDB link)
-- `GET /api/meetings` - List meetings with vote counts
-- `GET /api/meetings/:id` - Get meeting details
-- `POST /api/votes` - Submit ranked votes for a meeting
-- `GET /api/results` - Get voting results (optionally filtered by meeting)
-- `GET /api/movies/:id/reviews` - Get movie reviews
-- `POST /api/movies/:id/reviews` - Add movie review
+### Public endpoints
+- `GET /api/movies` — list movies
+- `POST /api/movies` — suggest a movie (IMDB link auto-fetches poster + genres)
+- `GET /api/meetings` — list meetings with vote counts
+- `GET /api/meetings/:id` — meeting details
+- `POST /api/votes` — submit ranked ballot + availability
+- `GET /api/votes` — list ballots (optionally filtered by meeting)
+- `GET /api/results` — computed results (optionally filtered by meeting)
+- `GET /api/movies/:id/reviews` — reviews for a movie
+- `POST /api/movies/:id/reviews` — add a review (0-10)
+- `GET /api/posters/:movieId` — cached poster image proxy
 
-### Admin Endpoints (require authentication)
-- `POST /api/admin/login` - Admin login
-- `POST /api/admin/logout` - Admin logout  
-- `GET /api/admin/me` - Check admin status
-- `DELETE /api/movies/:id` - Delete movie
-- `POST /api/meetings` - Create meeting
-- `PATCH /api/meetings/:id` - Update meeting (close voting, etc.)
-- `DELETE /api/meetings/:id` - Delete meeting
-- `POST /api/meetings/:id/watched` - Set watched movie
+### Admin endpoints (require authentication)
+- `POST /api/admin/login` / `POST /api/admin/logout` / `GET /api/admin/me`
+- `DELETE /api/movies/:id` — delete
+- `PATCH /api/movies/:id/visibility` — hide/unhide
+- `POST /api/meetings` / `PATCH /api/meetings/:id` / `DELETE /api/meetings/:id`
+- `POST /api/meetings/:id/watched` — record the watched movie
+- `DELETE /api/votes/:id` — remove a ballot
+- `DELETE /api/reviews/:id` — remove a review
 
 ### Request Examples
 

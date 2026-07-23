@@ -1,221 +1,88 @@
-# Distruibued Denail of Screentime - Firebase Setup Guide
+# Firebase Setup Guide
 
-This guide will help you migrate your Distruibued Denail of Screentime app from SQLite to Firebase/Firestore.
+Detailed setup for running this app against Firebase (Firestore + Functions + Hosting). The main [README.md](README.md) covers day-to-day dev, deploy, and review flow — this doc is the one-time onboarding when standing up a new Firebase project or wiring your machine to the existing one.
 
-## 🔧 Prerequisites
+Current project: `distributed-denial-of-screen` (see `.firebaserc`).
 
-1. **Node.js** (v18 or higher)
-2. **Firebase CLI** (already installed)
-3. **A Firebase project** (you'll create this)
+## Prerequisites
 
-## 🚀 Setup Instructions
+- Node.js 20+ (matches the Functions runtime)
+- Firebase CLI: `npm install -g firebase-tools`
+- Access to the Firebase project (or permission to create your own)
 
-### Step 1: Create a Firebase Project
+## Standing up a new Firebase project
 
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Click "Create a project" or "Add project"
-3. Enter a project name (e.g., "movie-picker-app")
-4. Enable Google Analytics if desired
-5. Create the project
+Skip this section if you're just connecting to the existing `distributed-denial-of-screen` project.
 
-### Step 2: Enable Firestore Database
+1. Create the project at [Firebase Console](https://console.firebase.google.com/).
+2. Enable **Firestore Database** — start in production mode; rules live in `firestore.rules`.
+3. Enable **Cloud Functions** (requires the Blaze plan — Firestore Functions won't deploy on Spark).
+4. Enable **Hosting**.
+5. In Project Settings → Service Accounts → **Generate new private key**. Save the JSON somewhere outside the repo.
 
-1. In your Firebase project console, go to **Firestore Database**
-2. Click "Create database"
-3. Choose "Start in test mode" (you can change security rules later)
-4. Select a location (choose one close to your users)
+## Wiring your machine
 
-### Step 3: Get Firebase Credentials
+1. `firebase login` (interactive) and `firebase use distributed-denial-of-screen`.
+2. Point `GOOGLE_APPLICATION_CREDENTIALS` at the service-account JSON, or paste the JSON into `FIREBASE_SERVICE_ACCOUNT_KEY`. See `.env.firebase.example`.
+3. Generate a bcrypt admin hash with `node generate-password-hash.js` and set `ADMIN_PASSWORD_HASH` in `.env`. **The servers read the hash, not a plaintext password.**
+4. Push local env into Functions config: `./set-firebase-env.sh`. This copies `ADMIN_PASSWORD_HASH` and `TMDB_API_KEY` into `firebase functions:config`.
+5. Deploy Firestore rules once so the DB isn't wide open: `npm run deploy:firestore`.
 
-#### Option A: Service Account Key (Recommended for local development)
+## Running against Firebase
 
-1. In Firebase Console, go to **Project Settings** (gear icon)
-2. Go to **Service Accounts** tab
-3. Click "Generate new private key"
-4. Download the JSON file and save it securely
-5. Either:
-   - Copy the entire JSON content for `FIREBASE_SERVICE_ACCOUNT_KEY`
-   - Or save the file path for `GOOGLE_APPLICATION_CREDENTIALS`
+- `npm run start:firebase` — runs `server-firebase.js` locally against **live** Firestore. Fast to iterate; changes hit real data.
+- `npm run start:emulator` — Firebase emulators for Functions + Firestore + Hosting. Isolated from prod data.
+- Production: `npm run deploy` (or the narrower `deploy:hosting` / `deploy:functions` / `deploy:firestore`).
 
-#### Option B: Firebase Config (For web deployment)
+## Migrating SQLite data
 
-1. In Firebase Console, go to **Project Settings**
-2. In **General** tab, scroll down to "Your apps"
-3. Click "Add app" and select web (</>) 
-4. Register your app and copy the config object
-
-### Step 4: Configure Environment Variables
-
-1. Copy the environment template:
-   ```bash
-   cp .env.firebase.example .env
-   ```
-
-2. Edit `.env` file with your Firebase credentials:
-   ```env
-   # Admin password for your app
-   ADMIN_PASSWORD=your_secure_admin_password
-
-   # TMDB API Key (optional, for movie posters)
-   TMDB_API_KEY=your_tmdb_api_key
-
-   # Firebase Service Account Key (paste entire JSON)
-   FIREBASE_SERVICE_ACCOUNT_KEY={"type":"service_account","project_id":"your-project-id",...}
-
-   # OR use file path instead
-   # GOOGLE_APPLICATION_CREDENTIALS=/path/to/serviceAccountKey.json
-
-   # Your Firebase Project ID
-   FIREBASE_PROJECT_ID=your-project-id
-   ```
-
-### Step 5: Initialize Firebase in Your Project
-
-1. Login to Firebase CLI:
-   ```bash
-   firebase login
-   ```
-
-2. Initialize Firebase in your project:
-   ```bash
-   firebase init
-   ```
-   
-   Select:
-   - **Firestore**: Configure security rules and indexes
-   - **Functions**: Configure Cloud Functions
-   - **Hosting**: Configure files for Firebase Hosting
-   
-   When prompted:
-   - Use existing project (select your project)
-   - Accept default file names
-   - Don't overwrite existing files
-   - Install dependencies for functions
-
-3. Update `.firebaserc` with your project ID:
-   ```bash
-   firebase use your-project-id
-   ```
-
-### Step 6: Deploy Firestore Rules
-
-```bash
-firebase deploy --only firestore:rules
-```
-
-### Step 7: Migrate Your SQLite Data (Optional)
-
-If you have existing SQLite data:
+If you have an existing `moviepicker.db` and want to seed Firestore from it:
 
 ```bash
 npm run migrate
 ```
 
-This will transfer all your movies, meetings, ballots, and reviews to Firestore.
+Reads `moviepicker.db`, writes to the Firestore project configured in `.env`. **Snapshot Firestore first** if the target isn't empty — the migration doesn't diff, it writes.
 
-## 🏃‍♂️ Running the Application
+## Firestore data model
 
-### Local Development Options
+Four collections, all keyed by auto-generated ids unless noted:
 
-1. **SQLite version** (original):
-   ```bash
-   npm run start:sqlite
-   ```
+- **movies** — `title`, `poster`, `imdb_id`, `genres[]`, `suggestions[]` (each with `suggester`, `notes`, timestamp), `hidden`, cached poster fields
+- **meetings** — `name`, `candidate_dates[]`, `allowed_movie_ids[]`, `voting_closed`, `winner_movie_id`, `winner_date`, `watched_movie_id`
+- **ballots** — `meeting_id`, `username`, `ranks[]` (`{movieId, rank}`), `availability[]`
+- **reviews** — `movie_id`, `username`, `rating` (0-10), `text`
 
-2. **Firebase version** (local server with Firestore):
-   ```bash
-   npm run start:firebase
-   ```
+Indexes are declared in `firestore.indexes.json`; rules in `firestore.rules`. When adding a query that filters + orders on multiple fields, add the composite index or the Firebase Emulator will yell at you.
 
-3. **Firebase Emulators** (local Firebase simulation):
-   ```bash
-   npm run start:emulator
-   ```
+## Ad-hoc data maintenance
 
-### Production Deployment
+The repo has a set of one-off scripts that talk to Firestore directly with the service account. They are **not** part of the app runtime and are meant to be run manually when data drift needs cleaning up:
 
-1. **Deploy everything**:
-   ```bash
-   npm run deploy
-   ```
+| Script | Purpose |
+|--------|---------|
+| `check-movies.js` | Inventory + duplicate detection by IMDB id |
+| `merge-duplicates.js` | Merge movies sharing an IMDB id |
+| `fix-all-movies.js` | Backfill missing IMDB ids via TMDB search |
+| `hide-all-movies.js` | Mark all movies `hidden: true` (useful before a reset) |
+| `cleanup-poster-cache.js` | Strip cached poster blobs from Firestore docs |
+| `cache-posters*.js` | Populate the poster cache with different strategies |
+| `backfill-metadata.js`, `backfill-by-title.js`, `firebase-backfill-metadata.js`, `migrate-metadata.js`, `production-backfill.js` | One-time metadata backfills |
 
-2. **Deploy only hosting**:
-   ```bash
-   npm run deploy:hosting
-   ```
+Run with `node <script>.js`. Most expect `GOOGLE_APPLICATION_CREDENTIALS` or the default service-account JSON at the repo root.
 
-3. **Deploy only functions**:
-   ```bash
-   npm run deploy:functions
-   ```
+## Troubleshooting
 
-## 📋 Information You Need from Firebase
+**"Permission denied" on Firestore reads/writes** — you deployed rules but the client isn't authenticated as admin. Server-side scripts authenticate via the service account and bypass rules; browser clients hit the rules directly.
 
-Here's what you need to copy from your Firebase project:
+**Admin login fails after deploy** — `functions:config` didn't get the hash. Re-run `./set-firebase-env.sh` then `npm run deploy:functions`. Verify with `firebase functions:config:get`.
 
-### 🔑 Required Information
+**`firebase deploy` complains about the Blaze plan** — Functions require Blaze. Hosting-only deploys work on Spark.
 
-1. **Project ID**: Found in Project Settings > General
-2. **Service Account Key**: Generated in Project Settings > Service Accounts
-3. **Web App Config** (if using client SDK): Found in Project Settings > General > Your apps
+**Emulator ignores your data** — the emulator uses its own local Firestore. Import/export with `firebase emulators:start --import=./emulator-data --export-on-exit`.
 
-### 📝 Example Service Account Key Structure
-
-```json
-{
-  "type": "service_account",
-  "project_id": "your-project-id",
-  "private_key_id": "key-id",
-  "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
-  "client_email": "firebase-adminsdk-xxxxx@your-project-id.iam.gserviceaccount.com",
-  "client_id": "client-id",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-xxxxx%40your-project-id.iam.gserviceaccount.com"
-}
-```
-
-## 🗄️ Database Structure
-
-Your data will be organized in these Firestore collections:
-
-- **movies**: Movie suggestions with posters and genres
-- **meetings**: Movie night meetings with voting status
-- **ballots**: User votes with rankings and availability
-- **reviews**: User reviews and ratings for watched movies
-
-## 🔒 Security Rules
-
-The Firestore security rules are configured to:
-- Allow public read access to movies and meetings
-- Allow users to create ballots and reviews
-- Restrict admin operations to server-side only
-
-## 🆘 Troubleshooting
-
-### Common Issues
-
-1. **"Permission denied" errors**: Check your Firestore security rules
-2. **"Invalid credentials" errors**: Verify your service account key
-3. **"Project not found" errors**: Ensure your project ID is correct
-4. **Migration fails**: Make sure your SQLite database exists
-
-### Getting Help
-
-1. Check the Firebase Console for error logs
-2. Review Firestore security rules
-3. Verify environment variables are set correctly
-4. Check network connectivity to Firebase services
-
-## 🎯 Next Steps
-
-1. Test your Firebase setup locally
-2. Deploy to Firebase Hosting
-3. Update your domain/DNS settings
-4. Monitor usage in Firebase Console
-5. Set up backup strategies for your data
+**Poster fetch returns 204 / empty** — TMDB rate limit or missing `TMDB_API_KEY`. The poster cache (`GET /api/posters/:movieId`) is populated on suggest; run one of the `cache-posters*.js` scripts to backfill.
 
 ---
 
-**Note**: Keep your service account key secure and never commit it to version control!
+**Reminder:** never commit `service-account.json`, `distributed-denial-of-screen-firebase-adminsdk-*.json`, or `.env`. They're gitignored — keep it that way.
